@@ -234,7 +234,7 @@
     const currentVillage = villages[state.village];
     const nextVillage = villages[Math.min(9, state.village + 1)];
     main.innerHTML = `<section class="page home-page">
-      ${pageHead("领地总览", `${state.player.name}的主城`, `${currentVillage} · 新手保护第 1 日 · 当前天气：薄雾`, `<button class="button" data-action="open-profile">${icon("scroll-text")}<span>主公档案</span></button><button class="button primary" data-action="go-campaign">${icon("swords")}<span>继续主线</span></button>`)}
+      ${pageHead("领地总览", `${state.player.name}的主城`, `${currentVillage} · 新手保护第 1 日 · 当前天气：薄雾`, `<button class="button" data-action="share-game">${icon("share-2")}<span>分享游戏</span></button><button class="button" data-action="open-profile">${icon("scroll-text")}<span>主公档案</span></button><button class="button primary" data-action="go-campaign">${icon("swords")}<span>继续主线</span></button>`)}
       <div class="home-grid">
         <div class="home-main">
           <section class="panel world-map" aria-label="领地地图">
@@ -579,6 +579,36 @@
     showModal(modalShell("设置", `${toggle("界面动态", "地图节点与战斗反馈动画", "motion")}${toggle("游戏音效", "当前原型未加载音频素材", "sound")}<div style="padding-top:15px"><button class="button danger" data-action="confirm-reset">${icon("trash-2")} 重置本地存档</button></div>`, `<button class="button" data-action="close-modal">完成</button>`));
   }
 
+  const PUBLIC_GAME_URL = "https://pxz20100204.github.io/world-online-mvp/";
+
+  function showShareGame() {
+    const nativeShare = typeof navigator.share === "function";
+    const body = `<div class="share-preview"><img src="assets/social-preview.png" alt="世界 Online 主城游戏画面"><div><span class="tag gold">公开测试版</span><h3>邀请朋友进入世界</h3><p>经营主城、召唤人物、组成三人队伍，一起从弱鸡村走向通关村。</p></div></div><label class="share-link"><span>公开网址</span><input value="${PUBLIC_GAME_URL}" readonly aria-label="游戏公开网址"></label>`;
+    const foot = `<button class="button" data-action="copy-share-link">${icon("copy")} 复制链接</button>${nativeShare ? `<button class="button primary" data-action="native-share">${icon("share-2")} 系统分享</button>` : ""}`;
+    showModal(modalShell("分享《世界 Online》", body, foot));
+  }
+
+  async function copyShareLink() {
+    try {
+      await navigator.clipboard.writeText(PUBLIC_GAME_URL);
+      toast("公开链接已复制，可以发送给朋友", "copy-check");
+      closeModal();
+    } catch (error) {
+      const input = document.querySelector(".share-link input");
+      input?.select();
+      toast("请使用浏览器菜单复制已选中的链接", "info");
+    }
+  }
+
+  async function nativeShareGame() {
+    try {
+      await navigator.share({ title: "世界 Online", text: "经营主城、召唤人物、组成队伍，来挑战人物之王。", url: PUBLIC_GAME_URL });
+      closeModal();
+    } catch (error) {
+      if (error.name !== "AbortError") copyShareLink();
+    }
+  }
+
   function startBattle(stageId) {
     const stage = stages.find((item) => item.id === stageId);
     if (!stage || stage.id > state.stageProgress + 1 || state.energy < stage.energy || !state.team.length) return;
@@ -783,6 +813,9 @@
     if (action === "go-heroes") { closeModal(); setRoute("heroes"); }
     if (action === "go-summon") { closeModal(); setRoute("summon"); }
     if (action === "open-profile") showProfile();
+    if (action === "share-game") showShareGame();
+    if (action === "copy-share-link") copyShareLink();
+    if (action === "native-share") nativeShareGame();
     if (action === "merchant") showMerchant();
     if (action === "archive-faction") { ui.archiveTab = "factions"; setRoute("archives"); }
     if (action === "dismiss-alert") { actionButton.closest(".map-alert")?.remove(); toast("雷区位置已标记在北境外环", "map-pin"); }
