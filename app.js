@@ -20,6 +20,9 @@
     giftResults: [],
     chatDraft: "",
     guideDraft: "",
+    arenaPlayerHero: "egg-lord",
+    arenaKingHero: "tea-weakened",
+    arenaActive: false,
     battle: null
   };
 
@@ -66,6 +69,7 @@
     },
     guide: { messages: [], opened: false },
     rebel: { intel: 24, adaptation: 0, activeEvent: null, history: [], lastEventAt: 0, simulationCount: 0 },
+    arena: { matches: 0, wins: 0, losses: 0, draws: 0, kingWins: 0, bestTime: 0, firstWinRewarded: false },
     lastSaveAt: Date.now(),
     settings: { sound: true, motion: true }
   });
@@ -104,6 +108,7 @@
         rebel: Object.assign(defaultState().rebel, saved.rebel || {}, {
           history: Array.isArray(saved.rebel?.history) ? saved.rebel.history.slice(-8) : []
         }),
+        arena: Object.assign(defaultState().arena, saved.arena || {}),
         settings: Object.assign(defaultState().settings, saved.settings || {})
       });
     } catch (error) {
@@ -552,7 +557,7 @@
 
   function currentRoute() {
     const route = (location.hash || "#home").slice(1).split("?")[0];
-    return ["home", "campaign", "heroes", "summon", "archives"].includes(route) ? route : "home";
+    return ["home", "campaign", "arena", "heroes", "summon", "archives"].includes(route) ? route : "home";
   }
 
   function setRoute(route) {
@@ -568,9 +573,11 @@
 
   function render() {
     const route = currentRoute();
+    if (route !== "arena" && ui.arenaActive) stopArenaMatch();
     updateNavigation(route);
     if (route === "home") renderHome();
     if (route === "campaign") renderCampaign();
+    if (route === "arena") renderArena();
     if (route === "heroes") renderHeroes();
     if (route === "summon") renderSummon();
     if (route === "archives") renderArchives();
@@ -1113,10 +1120,167 @@
     </aside>`;
   }
 
+  function arenaHeroOption(hero, side, selected) {
+    const owned = Boolean(state.roster[hero.id]);
+    const disabled = side === "player" && !owned;
+    return `<button class="arena-hero-option ${selected === hero.id ? "selected" : ""} ${disabled ? "locked" : ""}" data-action="select-arena-hero" data-side="${side}" data-hero-id="${hero.id}" ${disabled ? "disabled" : ""}>
+      ${portrait(hero)}<span><strong>${hero.name}</strong><small>${hero.rarity} · ${hero.role}${side === "player" ? owned ? ` · Lv.${state.roster[hero.id].level}` : " · 未拥有" : ""}</small></span>${selected === hero.id ? icon("check") : ""}
+    </button>`;
+  }
+
+  function renderArena() {
+    if (ui.arenaActive && window.WorldArena?.isRunning() && document.getElementById("arena-game-root")) return;
+    ui.arenaActive = false;
+    window.WorldArena?.stop();
+    const ownedHeroes = heroes.filter((hero) => state.roster[hero.id]);
+    if (!ownedHeroes.some((hero) => hero.id === ui.arenaPlayerHero)) ui.arenaPlayerHero = ownedHeroes[0]?.id || "egg-lord";
+    if (!heroes.some((hero) => hero.id === ui.arenaKingHero)) ui.arenaKingHero = "egg-lord";
+    const playerHero = getHero(ui.arenaPlayerHero);
+    const kingHero = getHero(ui.arenaKingHero);
+    main.innerHTML = `<section class="page arena-page">
+      ${pageHead("野局竞技", "人物之王挑战", "1v1 单线 · 局内成长 · 摧毁基地或三分钟结算", `<button class="button" data-action="arena-rules">${icon("book-open-check")}<span>完整规则</span></button>`)}
+      <div class="arena-mode-bar" role="tablist" aria-label="野局规模"><button class="active">1v1 <small>可玩</small></button><button disabled>3v3 <small>规则就绪</small></button><button disabled>5v5 <small>规则就绪</small></button><button disabled>10v10 <small>规则就绪</small></button><button disabled>20v20 <small>立体地图</small></button></div>
+      <section class="arena-versus-panel panel">
+        <div class="arena-roster"><div class="arena-side-head"><div><span class="eyebrow">主公出战</span><h2>${playerHero.name}</h2></div><span class="tag teal">已拥有人物</span></div><div class="arena-hero-grid">${heroes.map((hero) => arenaHeroOption(hero, "player", ui.arenaPlayerHero)).join("")}</div></div>
+        <div class="arena-versus-mark"><strong>VS</strong><span>公平竞技属性</span><i></i></div>
+        <div class="arena-roster king"><div class="arena-side-head"><div><span class="eyebrow">人物之王使用</span><h2>${kingHero.name}</h2></div><span class="tag red">设定 IQ 800+</span></div><div class="arena-hero-grid">${heroes.map((hero) => arenaHeroOption(hero, "king", ui.arenaKingHero)).join("")}</div></div>
+      </section>
+      <section class="arena-launch panel">
+        <div class="arena-launch-copy"><span class="stat-icon gold">${icon("crown")}</span><div><h2>人物之王已载入 ${kingHero.name} 的技能模板</h2><p>双方从 1 级开始；人物之王只有局内单位和地图权限，独立决策器预算固定，不读取存档或聊天。</p></div></div>
+        <div class="arena-record"><span>对局<strong>${state.arena.matches}</strong></span><span>胜场<strong>${state.arena.kingWins}</strong></span><span>最快<strong>${state.arena.bestTime ? `${Math.floor(state.arena.bestTime)}s` : "--"}</strong></span></div>
+        <button class="button gold arena-start" data-action="start-king-arena">${icon("swords")} 开始人物之王挑战</button>
+      </section>
+      <section class="arena-rules-band">
+        <div><strong>兵线</strong><span>每 8 秒刷新三名小兵，防御塔优先攻击小兵。</span></div><div><strong>成长</strong><span>击杀获得经验与金币，最高 12 级，阵亡后短暂复活。</span></div><div><strong>胜负</strong><span>摧毁基地立即获胜；三分钟按基地、外塔和击杀结算。</span></div><div><strong>AI 限制</strong><span>400ms 一次、7 个动作、1.2 秒预测，超时自动撤退。</span></div>
+      </section>
+    </section>`;
+  }
+
+  function renderArenaMatchShell(playerHero, kingHero) {
+    main.innerHTML = `<section class="page arena-match-page">
+      <header class="arena-scoreboard">
+        <div class="arena-score-side player"><strong id="arena-player-kills">0</strong><span>${playerHero.name}</span><small id="arena-player-level">Lv.1</small></div>
+        <div class="arena-clock"><strong id="arena-time">03:00</strong><span>第 <b id="arena-wave">0</b> 波</span></div>
+        <div class="arena-score-side king"><small id="arena-king-level">Lv.1</small><span>人物之王 · ${kingHero.name}</span><strong id="arena-king-kills">0</strong></div>
+        <button class="icon-button arena-exit" data-action="forfeit-arena" aria-label="投降">${icon("flag")}</button>
+      </header>
+      <div class="arena-game-shell"><div id="arena-game-root"><div class="arena-loading">正在建立竞技场</div></div></div>
+      <section class="arena-hud">
+        <div class="arena-status-block player"><div class="arena-hp-head"><strong>${playerHero.name}</strong><span id="arena-player-hp">--</span></div><div class="arena-hp"><span id="arena-player-hp-bar"></span></div><div class="arena-objectives"><span>外塔 <b id="arena-player-tower">5200</b></span><span>基地 <b id="arena-player-core">8500</b></span><span>金币 <b id="arena-player-gold">0</b></span></div></div>
+        <div class="arena-controls" aria-label="野局操作">
+          <button data-action="arena-command" data-command="retreat" title="后撤">${icon("arrow-left")}</button>
+          <button data-action="arena-command" data-command="advance" title="推进">${icon("arrow-right")}</button>
+          <button id="arena-basic" data-action="arena-command" data-command="basic"><strong>普攻</strong><small class="cooldown"></small></button>
+          <button id="arena-skill1" data-action="arena-command" data-command="skill1"><strong>${playerHero.skills[0]}</strong><small class="cooldown"></small></button>
+          <button id="arena-skill2" data-action="arena-command" data-command="skill2"><strong>${playerHero.skills[1]}</strong><small class="cooldown"></small></button>
+          <button id="arena-ultimate" class="ultimate" data-action="arena-command" data-command="ultimate"><strong>${playerHero.skills[2]}</strong><small class="cooldown"></small></button>
+        </div>
+        <div class="arena-status-block king"><div class="arena-hp-head"><strong>人物之王</strong><span id="arena-king-hp">--</span></div><div class="arena-hp enemy"><span id="arena-king-hp-bar"></span></div><div class="arena-objectives"><span>外塔 <b id="arena-king-tower">5200</b></span><span>基地 <b id="arena-king-core">8500</b></span><span>等级 <b id="arena-ai-level">800+</b></span></div></div>
+      </section>
+        <div class="arena-bottom-line"><div id="arena-log" class="arena-live-log">等待兵线进入战场。</div><div class="arena-ai-budget"><span class="status-dot"></span><strong id="arena-ai-status">AI 启动中</strong><span id="arena-ai-reason">固定预算决策</span><b id="arena-fps">-- FPS</b></div></div>
+    </section>`;
+    refreshIcons();
+  }
+
+  function startArenaMatch() {
+    const playerHero = getHero(ui.arenaPlayerHero);
+    const kingHero = getHero(ui.arenaKingHero);
+    if (!playerHero || !kingHero || !state.roster[playerHero.id]) return toast("请选择已拥有的出战人物", "circle-alert");
+    if (!window.WorldArena || !window.Phaser) return toast("野局引擎未完成加载", "circle-alert");
+    ui.arenaActive = true;
+    renderArenaMatchShell(playerHero, kingHero);
+    requestAnimationFrame(() => {
+      try {
+        window.WorldArena.start({
+          parentId: "arena-game-root",
+          playerHero,
+          kingHero,
+          onHud: updateArenaHud,
+          onFinish: finishArenaMatch,
+          onReady: () => toast("人物之王 AI 已进入受限决策域", "cpu")
+        });
+      } catch (error) {
+        console.error("Arena failed to start", error);
+        ui.arenaActive = false;
+        toast("野局引擎启动失败", "circle-alert");
+        renderArena();
+      }
+    });
+  }
+
+  function updateArenaHud(snapshot) {
+    if (!snapshot || !ui.arenaActive) return;
+    const setText = (id, value) => { const element = document.getElementById(id); if (element) element.textContent = value; };
+    const setWidth = (id, value) => { const element = document.getElementById(id); if (element) element.style.width = `${Math.max(0, Math.min(100, value))}%`; };
+    const remaining = Math.max(0, snapshot.timeLimit - snapshot.elapsed);
+    setText("arena-time", `${String(Math.floor(remaining / 60)).padStart(2, "0")}:${String(Math.floor(remaining % 60)).padStart(2, "0")}`);
+    setText("arena-wave", snapshot.wave);
+    setText("arena-player-kills", snapshot.player.kills);
+    setText("arena-king-kills", snapshot.king.kills);
+    setText("arena-player-level", `Lv.${snapshot.player.level}`);
+    setText("arena-king-level", `Lv.${snapshot.king.level}`);
+    setText("arena-player-hp", snapshot.player.dead ? `复活 ${snapshot.player.respawn.toFixed(1)}s` : `${snapshot.player.hp}/${snapshot.player.maxHp}`);
+    setText("arena-king-hp", snapshot.king.dead ? `复活 ${snapshot.king.respawn.toFixed(1)}s` : `${snapshot.king.hp}/${snapshot.king.maxHp}`);
+    setWidth("arena-player-hp-bar", snapshot.player.hp / snapshot.player.maxHp * 100);
+    setWidth("arena-king-hp-bar", snapshot.king.hp / snapshot.king.maxHp * 100);
+    setText("arena-player-tower", Math.max(0, Math.floor(snapshot.playerTower)));
+    setText("arena-king-tower", Math.max(0, Math.floor(snapshot.kingTower)));
+    setText("arena-player-core", Math.max(0, Math.floor(snapshot.playerCore)));
+    setText("arena-king-core", Math.max(0, Math.floor(snapshot.kingCore)));
+    setText("arena-player-gold", snapshot.player.gold);
+    setText("arena-ai-status", snapshot.ai.status || "独立决策器正常");
+    setText("arena-ai-reason", `${snapshot.ai.reason || "固定预算决策"} · ${snapshot.ai.candidates || 7} 候选 · ${snapshot.ai.computeMs || 0}ms`);
+    setText("arena-fps", `${Math.round(snapshot.fps || 60)} FPS`);
+    const log = document.getElementById("arena-log");
+    if (log) log.textContent = snapshot.log.at(-1) || "对局进行中";
+    for (const key of ["basic", "skill1", "skill2", "ultimate"]) {
+      const button = document.getElementById(`arena-${key}`);
+      if (!button) continue;
+      const cooldown = snapshot.player.cooldowns[key];
+      button.disabled = snapshot.player.dead || cooldown > .05;
+      button.classList.toggle("cooling", cooldown > .05);
+      const label = button.querySelector(".cooldown");
+      if (label) label.textContent = cooldown > .05 ? `${cooldown.toFixed(1)}s` : "就绪";
+    }
+    document.querySelectorAll('[data-action="arena-command"][data-command="advance"],[data-action="arena-command"][data-command="retreat"]').forEach((button) => { button.disabled = snapshot.player.dead; });
+  }
+
+  function finishArenaMatch(result) {
+    state.arena.matches += 1;
+    if (result.winner === "player") {
+      state.arena.wins += 1;
+      state.arena.kingWins += 1;
+      state.arena.bestTime = !state.arena.bestTime ? result.elapsed : Math.min(state.arena.bestTime, result.elapsed);
+    } else if (result.winner === "king") state.arena.losses += 1;
+    else state.arena.draws += 1;
+    let reward = "";
+    if (result.winner === "player" && !state.arena.firstWinRewarded) {
+      state.arena.firstWinRewarded = true;
+      state.gold += 2000;
+      state.survival += 300;
+      reward = `<div class="reward-line" style="justify-content:center"><span class="reward-item">${icon("coins")} 2,000</span><span class="reward-item">${icon("gem")} 300</span></div>`;
+    }
+    saveState();
+    const title = result.winner === "player" ? "挑战成功" : result.winner === "king" ? "人物之王获胜" : "野局平局";
+    const note = result.winner === "player" ? "你在受限算力规则下击败了人物之王。" : result.winner === "king" ? "人物之王没有越界，只是更准确地管理了兵线、塔区与冷却。" : "双方在三分钟内保持了相同的目标得分。";
+    const body = `<div class="arena-result"><span class="stat-icon ${result.winner === "player" ? "gold" : "red"}">${icon(result.winner === "player" ? "trophy" : result.winner === "king" ? "crown" : "equal")}</span><h2>${title}</h2><p>${result.reason} · 用时 ${Math.floor(result.elapsed)} 秒</p><div class="arena-result-score"><span>${result.snapshot.player.name}<strong>${result.snapshot.player.kills}</strong></span><b>:</b><span>人物之王<strong>${result.snapshot.king.kills}</strong></span></div><p>${note}</p>${reward}</div>`;
+    showModal(modalShell("1v1 野局结算", body, `<button class="button" data-action="leave-arena">返回选人</button><button class="button primary" data-action="arena-rematch">${icon("rotate-cw")} 再战一局</button>`));
+  }
+
+  function stopArenaMatch() {
+    window.WorldArena?.stop();
+    ui.arenaActive = false;
+  }
+
+  function showArenaRules() {
+    const body = `<div class="arena-rulebook"><section><strong>1v1</strong><p>单线、双方各一座外塔与一座基地；三分钟内摧毁基地或以目标分取胜。</p></section><section><strong>3v3 / 5v5</strong><p>三路兵线、野区与团队复活；5v5 增加大型首领和分路经济，禁止规则级人物进入。</p></section><section><strong>10v10</strong><p>扩大地图和兵线容量，同屏单位采用分批刷新，保持固定模拟频率。</p></section><section><strong>20v20</strong><p>三维立体地图、六座塔、移动塔、天降狂雷、机械魔皇与地狱版本按设定开放。</p></section><section><strong>人物之王限制</strong><p>独立决策器每 400ms 最多决定一次，只能从 7 个许可动作中选择，最多预测 1.2 秒；不得读取页面、存档、聊天或网络，超时自动撤退。</p></section></div>`;
+    showModal(modalShell("野局规则", body, `<button class="button primary" data-action="close-modal">确认</button>`), "large");
+  }
+
   function renderCampaign() {
     const selected = stages.find((stage) => stage.id === ui.selectedStage) || stages[0];
     main.innerHTML = `<section class="page">
-      ${pageHead("主线征战", "生存纪元", `第 ${Math.min(state.stageProgress + 1, 9)} 章 · ${villages[state.village]} · 主线完成 ${state.stageProgress}/9`, `<button class="button" data-action="go-heroes">${icon("users")}<span>调整编队</span></button>`)}
+      ${pageHead("主线征战", "生存纪元", `第 ${Math.min(state.stageProgress + 1, 9)} 章 · ${villages[state.village]} · 主线完成 ${state.stageProgress}/9`, `<button class="button" data-action="go-arena">${icon("crown")}<span>人物之王挑战</span></button><button class="button" data-action="go-heroes">${icon("users")}<span>调整编队</span></button>`)}
       <div class="campaign-layout">
         <section class="panel stage-map">
           <svg class="stage-path" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M10 82 C17 76,20 72,25 67 S16 50,18 43 S31 30,38 29 S45 42,52 48 S60 36,67 31 S76 39,82 48 S78 65,73 73 S84 41,91 18" fill="none" stroke="rgba(255,255,255,.8)" stroke-width="1.4" stroke-dasharray="1.6 1.6" vector-effect="non-scaling-stroke"/></svg>
@@ -1150,7 +1314,7 @@
   }
 
   function renderArchives() {
-    const tabs = [["world", "globe-2", "世界架构"], ["characters", "users", "人物系统"], ["nation", "landmark", "国家经营"], ["factions", "flag", "阵营活动"], ["language", "languages", "金牛语"], ["rules", "scale", "法律裁决"]];
+    const tabs = [["world", "globe-2", "世界架构"], ["characters", "users", "人物系统"], ["nation", "landmark", "国家经营"], ["factions", "flag", "阵营活动"], ["arena", "gamepad-2", "野局竞技"], ["language", "languages", "金牛语"], ["rules", "scale", "法律裁决"]];
     const lore = archive[ui.archiveTab];
     main.innerHTML = `<section class="page">
       ${pageHead("世界档案", "生存纪元", "由服务器之星持续校订的公开设定", `<span class="tag gold">馆藏版本 26.7</span>`)}
@@ -1595,9 +1759,23 @@
     if (action === "close-modal" || action === "battle-complete") closeModal();
     if (action === "backdrop-close" && event.target === actionButton) closeModal();
     if (action === "go-campaign") { closeModal(); setRoute("campaign"); }
+    if (action === "go-arena") { closeModal(); setRoute("arena"); }
     if (action === "go-heroes") { closeModal(); setRoute("heroes"); }
     if (action === "go-summon") { closeModal(); setRoute("summon"); }
     if (action === "open-profile") showProfile();
+    if (action === "select-arena-hero") {
+      const heroId = actionButton.dataset.heroId;
+      if (actionButton.dataset.side === "player" && !state.roster[heroId]) return;
+      if (actionButton.dataset.side === "player") ui.arenaPlayerHero = heroId;
+      else ui.arenaKingHero = heroId;
+      renderArena();
+    }
+    if (action === "arena-rules") showArenaRules();
+    if (action === "start-king-arena") startArenaMatch();
+    if (action === "arena-command") window.WorldArena?.command(actionButton.dataset.command);
+    if (action === "forfeit-arena") window.WorldArena?.forfeit();
+    if (action === "leave-arena") { closeModal(); stopArenaMatch(); renderArena(); }
+    if (action === "arena-rematch") { closeModal(); stopArenaMatch(); startArenaMatch(); }
     if (action === "open-guide") showGuide();
     if (action === "ask-guide") askGuide(actionButton.dataset.topic || "");
     if (action === "send-guide") askGuide(ui.guideDraft);
@@ -1706,6 +1884,14 @@
     if (event.target.id === "guide-input" && event.key === "Enter") {
       event.preventDefault();
       askGuide(ui.guideDraft);
+    }
+    if (ui.arenaActive && !event.target.matches("input, textarea, select")) {
+      const arenaKeys = { ArrowLeft: "retreat", a: "retreat", A: "retreat", ArrowRight: "advance", d: "advance", D: "advance", q: "skill1", Q: "skill1", w: "skill2", W: "skill2", e: "ultimate", E: "ultimate", " ": "basic" };
+      const command = arenaKeys[event.key];
+      if (command) {
+        event.preventDefault();
+        window.WorldArena?.command(command);
+      }
     }
   }
 
