@@ -165,6 +165,57 @@
   ]);
   const TAURUS_KEYS = [...TAURUS_PHRASES.keys()].sort((left, right) => right.length - left.length);
 
+  const TAURUS_MULTILINGUAL_PHRASES = new Map([
+    ["hello", "sena"], ["hi", "sena"], ["thank you", "soro"], ["thanks", "soro"],
+    ["i need help", "mi ka sava ru naru"], ["help me", "mi ka sava ru naru"],
+    ["we need help", "mi-en ka sava ru naru"], ["can we team up", "mi-en ka du-zhal ru kai sa"],
+    ["hola", "sena"], ["gracias", "soro"], ["necesito ayuda", "mi ka sava ru naru"],
+    ["bonjour", "sena"], ["merci", "soro"], ["jai besoin daide", "mi ka sava ru naru"],
+    ["hallo", "sena"], ["danke", "soro"], ["ich brauche hilfe", "mi ka sava ru naru"],
+    ["olá", "sena"], ["ola", "sena"], ["obrigado", "soro"], ["obrigada", "soro"],
+    ["preciso de ajuda", "mi ka sava ru naru"], ["привет", "sena"], ["спасибо", "soro"],
+    ["мне нужна помощь", "mi ka sava ru naru"], ["こんにちは", "sena"], ["ありがとう", "soro"],
+    ["助けが必要です", "mi ka sava ru naru"], ["안녕하세요", "sena"], ["감사합니다", "soro"],
+    ["도움이 필요해요", "mi ka sava ru naru"], ["مرحبا", "sena"], ["شكرا", "soro"],
+    ["أحتاج إلى مساعدة", "mi ka sava ru naru"], ["नमस्ते", "sena"], ["धन्यवाद", "soro"],
+    ["मुझे मदद चाहिए", "mi ka sava ru naru"], ["no", "mu"], ["yes", "su"]
+  ]);
+
+  const TAURUS_WORDS = new Map([
+    ["i", "mi"], ["me", "mi"], ["my", "mi"], ["you", "ti"], ["your", "ti"],
+    ["we", "mi-en"], ["us", "mi-en"], ["everyone", "sen-en"], ["anyone", "sen"],
+    ["people", "sen-en"], ["person", "sen"], ["hello", "sena"], ["hi", "sena"],
+    ["thanks", "soro"], ["thank", "soro"], ["need", "naru"], ["help", "sava"],
+    ["can", "kai"], ["cannot", "mu kai"], ["cant", "mu kai"], ["not", "mu"],
+    ["no", "mu"], ["yes", "su"], ["team", "du-zhal"], ["party", "du-zhal"],
+    ["fight", "zhal"], ["battle", "zhal"], ["together", "du"], ["tonight", "nava"],
+    ["city", "tora"], ["village", "vila"], ["enter", "luma"], ["join", "luma"],
+    ["wait", "tari"], ["victory", "dai"], ["win", "dai"], ["summon", "karo"],
+    ["character", "vara"], ["hero", "vara"], ["gold", "aur"], ["merchant", "mara"],
+    ["gracias", "soro"], ["ayuda", "sava"], ["necesito", "naru"], ["equipo", "du-zhal"],
+    ["merci", "soro"], ["aide", "sava"], ["besoin", "naru"], ["équipe", "du-zhal"],
+    ["danke", "soro"], ["hilfe", "sava"], ["brauche", "naru"], ["team", "du-zhal"],
+    ["obrigado", "soro"], ["obrigada", "soro"], ["ajuda", "sava"], ["preciso", "naru"],
+    ["спасибо", "soro"], ["помощь", "sava"], ["нужна", "naru"], ["команда", "du-zhal"],
+    ["ありがとう", "soro"], ["助け", "sava"], ["必要", "naru"], ["チーム", "du-zhal"],
+    ["감사합니다", "soro"], ["도움", "sava"], ["필요", "naru"], ["팀", "du-zhal"],
+    ["شكرا", "soro"], ["مساعدة", "sava"], ["أحتاج", "naru"], ["فريق", "du-zhal"],
+    ["धन्यवाद", "soro"], ["मदद", "sava"], ["चाहिए", "naru"], ["टीम", "du-zhal"]
+  ]);
+
+  const TAURUS_VOCABULARY = new Set([
+    "aur", "aur-mara", "dai", "du", "du-luma", "du-zhal", "ka", "kai", "karo", "khan",
+    "li-luma", "luma", "mara", "mi", "mi-en", "mu", "naru", "nava", "no", "poma-len",
+    "ru", "sa", "sava", "sen", "sen-en", "sena", "soro", "su", "suru", "ta", "tari", "ti",
+    "tora", "vara", "vara-khan", "vila", "yo", "zhal", "zhal-un", "un", "tri", "kar", "pen",
+    "hex", "sev", "ok", "nav", "dek", "nul"
+  ]);
+
+  const TAURUS_NUMBERS = new Map([
+    ["0", "nul"], ["1", "un"], ["2", "du"], ["3", "tri"], ["4", "kar"], ["5", "pen"],
+    ["6", "hex"], ["7", "sev"], ["8", "ok"], ["9", "nav"], ["10", "dek"]
+  ]);
+
   function generatedTaurusRoot(character) {
     const code = character.codePointAt(0);
     const consonants = ["k", "g", "t", "d", "p", "b", "m", "n", "l", "r", "s", "v", "y"];
@@ -173,32 +224,101 @@
     return `${consonants[code % consonants.length]}${vowels[Math.floor(code / 7) % vowels.length]}${endings[Math.floor(code / 31) % endings.length]}`;
   }
 
-  function toTaurusLanguage(input) {
-    const source = input.trim();
-    if (!source) return "";
-    if (/^[a-zA-Z\s,.'?!-]+$/.test(source)) return source.toLowerCase();
-    if (TAURUS_PHRASES.has(source)) return `${TAURUS_PHRASES.get(source)}${source.endsWith("吗") ? "?" : "."}`;
+  function normalizeSourcePhrase(value) {
+    return value.normalize("NFKC").toLocaleLowerCase()
+      .replace(/[‘’'"“”`]/g, "")
+      .replace(/^[\u00BF\u00A1]+/g, "")
+      .replace(/[.,!?。，！？:;；：\u00BF\u00A1\u061F\u060C\u061B\u0964]+$/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function looksLikeTaurus(value) {
+    if (/[^a-zA-Z\s,.'?!-]/.test(value)) return false;
+    const words = value.toLocaleLowerCase().match(/[a-z]+(?:-[a-z]+)*/g) || [];
+    return words.length > 0 && words.every((word) => TAURUS_VOCABULARY.has(word));
+  }
+
+  function isDirectTaurusInput(value) {
+    const normalized = normalizeSourcePhrase(value);
+    return !TAURUS_MULTILINGUAL_PHRASES.has(normalized) && looksLikeTaurus(value);
+  }
+
+  function generatedTaurusWord(value) {
+    let hash = 2166136261;
+    for (const character of value.normalize("NFKC").toLocaleLowerCase()) {
+      hash ^= character.codePointAt(0);
+      hash = Math.imul(hash, 16777619);
+    }
+    const consonants = ["k", "g", "t", "d", "p", "b", "m", "n", "l", "r", "s", "v", "y"];
+    const vowels = ["a", "e", "i", "o", "u"];
+    const endings = ["n", "l", "r", "s", "m"];
+    const syllable = (seed) => `${consonants[seed % consonants.length]}${vowels[(seed >>> 5) % vowels.length]}${endings[(seed >>> 9) % endings.length]}`;
+    const first = syllable(hash >>> 0);
+    const secondSeed = ((hash >>> 13) ^ hash) >>> 0;
+    return [...value].length > 6 ? `${first}-${syllable(secondSeed)}` : first;
+  }
+
+  function convertHanText(value) {
     const output = [];
     let index = 0;
-    while (index < source.length) {
-      const character = source[index];
-      if (/\s/.test(character)) { index += 1; continue; }
-      if (/[，,]/.test(character)) { output.push(","); index += 1; continue; }
-      if (/[。.!！]/.test(character)) { output.push("."); index += 1; continue; }
-      if (/[？?]/.test(character)) { output.push("?"); index += 1; continue; }
-      const key = TAURUS_KEYS.find((candidate) => source.startsWith(candidate, index));
+    while (index < value.length) {
+      const key = TAURUS_KEYS.find((candidate) => value.startsWith(candidate, index));
       if (key) {
         output.push(TAURUS_PHRASES.get(key));
         index += key.length;
-      } else if (/\p{Script=Han}/u.test(character)) {
+      } else {
+        const character = String.fromCodePoint(value.codePointAt(index));
         output.push(generatedTaurusRoot(character));
         index += character.length;
-      } else {
-        output.push(character.toLowerCase());
-        index += 1;
       }
     }
-    return `${output.join(" ").replace(/\s+([,.?])/g, "$1")}${/[.?!]$/.test(output.at(-1) || "") ? "" : "."}`;
+    return output;
+  }
+
+  function finishTaurusSentence(value, source) {
+    let result = value
+      .replace(/[，、;；]/g, ",")
+      .replace(/[。]/g, ".")
+      .replace(/[！]/g, "!")
+      .replace(/[\uFF1F\u061F]/g, "?")
+      .replace(/\s+([,.?!])/g, "$1")
+      .replace(/([,.?!]){2,}/g, "$1")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!/[.?!]$/.test(result)) {
+      result += /[\u003F\uFF1F\u061F]\s*$/.test(source) || /吗\s*$/.test(source) ? "?" : /[!！]\s*$/.test(source) ? "!" : ".";
+    }
+    if (result.length <= 120) return result;
+    const clipped = result.slice(0, 119).replace(/\s+\S*$/, "").replace(/[,.?!]+$/, "");
+    return `${clipped || result.slice(0, 119)}.`;
+  }
+
+  function toTaurusLanguage(input) {
+    const source = input.trim();
+    if (!source) return "";
+    const normalizedPhrase = normalizeSourcePhrase(source);
+    const knownPhrase = TAURUS_PHRASES.get(normalizedPhrase) || TAURUS_MULTILINGUAL_PHRASES.get(normalizedPhrase);
+    if (knownPhrase) return finishTaurusSentence(knownPhrase, source);
+    if (isDirectTaurusInput(source)) return finishTaurusSentence(source.toLocaleLowerCase(), source);
+    const output = [];
+    const tokens = source.match(/\p{L}[\p{L}\p{M}\p{N}'’_-]*|\p{N}+|[^\p{L}\p{M}\p{N}\s]/gu) || [];
+    for (const token of tokens) {
+      if (/^[，,、;；:：،؛]$/.test(token)) output.push(",");
+      else if (/^[。.!！।]$/.test(token)) output.push(token === "!" || token === "！" ? "!" : ".");
+      else if (/^[\u003F\uFF1F\u061F]$/.test(token)) output.push("?");
+      else if (/^[\u00BF\u00A1]$/.test(token)) continue;
+      else if (/^[()（）\[\]【】{}「」『』‘’'"“”]$/.test(token)) continue;
+      else if (/^\p{N}+$/u.test(token)) {
+        output.push(TAURUS_NUMBERS.get(token) || [...token].map((digit) => TAURUS_NUMBERS.get(digit) || digit).join("-"));
+      } else if (/^\p{Script=Han}+$/u.test(token)) {
+        output.push(...convertHanText(token));
+      } else {
+        const normalizedToken = normalizeSourcePhrase(token);
+        output.push(TAURUS_WORDS.get(normalizedToken) || generatedTaurusWord(token));
+      }
+    }
+    return finishTaurusSentence(output.join(" "), source);
   }
 
   function realtimeMessage(row) {
@@ -275,7 +395,7 @@
     const messageHTML = messages.length ? messages.map((message) => `<article class="chat-message ${message.author === state.player.name ? "own" : ""}">
       <div class="chat-message-meta"><strong>${escapeHTML(message.author)}</strong><span>${escapeHTML(message.village || "游走者")} · ${escapeHTML(message.time || "刚刚")}</span></div>
       <p class="${message.language === "gold" ? "taurus-text" : ""}">${escapeHTML(message.content)}</p>
-      ${message.translation ? `<small>普通语：${escapeHTML(message.translation)}</small>` : ""}
+      ${message.translation ? `<small>原文：${escapeHTML(message.translation)}</small>` : ""}
     </article>`).join("") : `<div class="chat-empty">${icon("radio")}<strong>${channelName}频道暂无消息</strong><span>你可以发送本频道的第一条消息。</span></div>`;
     const connectionText = { local: "本地原型", connecting: "连接中", online: "实时在线", offline: "连接失败" }[realtimeStatus];
     chatRoot.innerHTML = `<button class="chat-scrim" data-action="close-chat" aria-label="关闭聊天"></button><aside class="chat-drawer" aria-label="全服聊天">
@@ -284,7 +404,7 @@
       <div class="chat-messages" id="chat-messages">${messageHTML}</div>
       <div class="chat-composer">
         <div class="chat-language" aria-label="发送语言"><button class="${state.chat.language === "common" ? "active" : ""}" data-action="chat-language" data-language="common">普通语</button><button class="${state.chat.language === "gold" ? "active" : ""}" data-action="chat-language" data-language="gold">金牛语</button><button class="chat-language-help" data-action="open-taurus-archive" title="查看金牛语档案">${icon("circle-help")}</button></div>
-        <div class="chat-input-row"><textarea id="chat-input" rows="2" maxlength="120" placeholder="${state.chat.language === "gold" ? "输入普通语自动转换，或直接输入金牛语" : `发送到${channelName}频道`}">${escapeHTML(ui.chatDraft)}</textarea><button class="chat-send" data-action="send-chat" aria-label="发送消息" title="发送">${icon("send")}</button></div>
+        <div class="chat-input-row"><textarea id="chat-input" rows="2" maxlength="120" placeholder="${state.chat.language === "gold" ? "输入任意语言自动转换，或直接输入金牛语" : `发送到${channelName}频道`}">${escapeHTML(ui.chatDraft)}</textarea><button class="chat-send" data-action="send-chat" aria-label="发送消息" title="发送">${icon("send")}</button></div>
       </div>
     </aside>`;
     refreshIcons();
@@ -319,7 +439,7 @@
       village: villages[state.village],
       time: `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`,
       content: isGold ? toTaurusLanguage(source) : source,
-      translation: isGold && !/^[a-zA-Z\s,.'?!-]+$/.test(source) ? source : "",
+      translation: isGold && !isDirectTaurusInput(source) ? source : "",
       language: isGold ? "gold" : "common"
     };
     if (realtimeConfigured) {
