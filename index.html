@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#18201f">
+  <title>世界 Online</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='8' fill='%2318201f'/%3E%3Cpath d='M14 18h36v28H14z' fill='none' stroke='%23d3a75e' stroke-width='4'/%3E%3Cpath d='M20 26h24M20 36h24' stroke='%23f4e2bd' stroke-width='3'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <header class="topbar">
+      <button class="icon-button mobile-menu" id="mobile-menu" aria-label="打开导航" title="打开导航">
+        <i data-lucide="menu"></i>
+      </button>
+      <a class="brand" href="#home" data-route="home" aria-label="世界 Online 主城">
+        <span class="brand-mark" aria-hidden="true">世</span>
+        <span class="brand-copy"><strong>世界 Online</strong><small>金牛一服 · 第 <span id="world-day">1</span> 日</small></span>
+      </a>
+      <div class="top-resources" aria-label="资源">
+        <button class="resource-pill" data-resource="gold" title="金币：用于科技研发与角色培养">
+          <i data-lucide="coins"></i><span id="gold-value">0</span>
+        </button>
+        <button class="resource-pill" data-resource="survival" title="生存币：用于人物召唤">
+          <i data-lucide="gem"></i><span id="survival-value">0</span>
+        </button>
+        <button class="resource-pill energy-pill" data-resource="energy" title="行动力：进入副本时消耗">
+          <i data-lucide="zap"></i><span id="energy-value">0/0</span>
+        </button>
+      </div>
+      <button class="profile-button" id="profile-button" aria-label="打开主公档案">
+        <span class="profile-level" id="profile-level">Lv.1</span>
+        <span class="profile-avatar" id="profile-avatar">主</span>
+      </button>
+    </header>
+
+    <aside class="sidebar" id="sidebar">
+      <nav class="primary-nav" aria-label="主导航">
+        <a href="#home" data-route="home" class="nav-item active"><i data-lucide="castle"></i><span>主城</span></a>
+        <a href="#campaign" data-route="campaign" class="nav-item"><i data-lucide="swords"></i><span>征战</span><b id="campaign-dot" class="nav-dot" aria-label="有新关卡"></b></a>
+        <a href="#heroes" data-route="heroes" class="nav-item"><i data-lucide="users"></i><span>人物</span></a>
+        <a href="#summon" data-route="summon" class="nav-item"><i data-lucide="sparkles"></i><span>召唤</span></a>
+        <a href="#archives" data-route="archives" class="nav-item"><i data-lucide="book-open"></i><span>纪元</span></a>
+      </nav>
+      <div class="sidebar-lower">
+        <button class="mini-assistant" id="assistant-button">
+          <i data-lucide="bot"></i>
+          <span><strong>挂机小助手</strong><small>初级 · 可领取</small></span>
+          <b id="idle-dot" class="status-dot"></b>
+        </button>
+        <button class="sidebar-action" id="settings-button"><i data-lucide="settings"></i><span>设置</span></button>
+      </div>
+    </aside>
+    <button class="sidebar-scrim" id="sidebar-scrim" aria-label="关闭导航"></button>
+
+    <main id="main-content" class="main-content" tabindex="-1"></main>
+
+    <nav class="mobile-nav" aria-label="移动端主导航">
+      <a href="#home" data-route="home" class="active"><i data-lucide="castle"></i><span>主城</span></a>
+      <a href="#campaign" data-route="campaign"><i data-lucide="swords"></i><span>征战</span></a>
+      <a href="#heroes" data-route="heroes"><i data-lucide="users"></i><span>人物</span></a>
+      <a href="#summon" data-route="summon"><i data-lucide="sparkles"></i><span>召唤</span></a>
+      <a href="#archives" data-route="archives"><i data-lucide="book-open"></i><span>纪元</span></a>
+    </nav>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast-root" class="toast-root" aria-live="polite"></div>
+
+  <script src="vendor/lucide.min.js"></script>
+  <script src="game-data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

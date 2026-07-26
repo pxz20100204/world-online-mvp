@@ -1,0 +1,145 @@
+(function () {
+  const heroes = [
+    {
+      id: "egg-lord", name: "蛋君", rarity: "R", role: "守御", faction: "初始之盟", color: "#d7a84f", accent: "#fff3cf", shape: "egg",
+      baseAtk: 520, baseHp: 3800, baseDef: 310, quote: "别催，妈妈炮正在预热。",
+      lore: "每位主公都会遇见的第一位伙伴，不可替代。圆润的外形下藏着一条无人知晓的进化路径。",
+      skills: ["妈妈炮", "蛋壳阵地", "破壳一击"]
+    },
+    {
+      id: "reputation-master", name: "声望之主", rarity: "SR", role: "辅助", faction: "初始之盟", color: "#597b74", accent: "#dcece7", shape: "crown",
+      baseAtk: 470, baseHp: 3300, baseDef: 250, quote: "众人信我，我便无所不能。",
+      lore: "实力完全随主公声望升降，任何培养道具都不能让他升级。声望越高，他的加成越强。",
+      skills: ["名望震击", "众望加护", "万众一心"]
+    },
+    {
+      id: "big-bun", name: "大包子", rarity: "R", role: "守御", faction: "包子族", color: "#b47350", accent: "#f5dfca", shape: "bun",
+      baseAtk: 430, baseHp: 4600, baseDef: 380, quote: "能扛住的，就不用躲。",
+      lore: "包子族的年轻勇士，拥有进化成彩虹大包子的潜力。身体看似柔软，实际极其抗打。",
+      skills: ["面团冲撞", "热气护体", "彩虹预兆"]
+    },
+    {
+      id: "dram", name: "德拉姆", rarity: "R", role: "突击", faction: "龙城", color: "#487397", accent: "#dbe8ef", shape: "sword",
+      baseAtk: 610, baseHp: 3000, baseDef: 210, quote: "七岁也能守住该守的事。",
+      lore: "年仅七岁的正义少年，IQ120。战斗经验不多，却会在关键时刻做出极正确的判断。",
+      skills: ["正义直刺", "冷静判断", "少年决意"]
+    },
+    {
+      id: "cube-king", name: "草方块之王", rarity: "SR", role: "谋略", faction: "荒原国", color: "#3f805e", accent: "#d8eadc", shape: "cube",
+      baseAtk: 760, baseHp: 3500, baseDef: 260, quote: "先摆好方块，再决定胜负。",
+      lore: "以严密谋略著称的国王。本人不爱夸口，战斗力却足以压制多数领主级人物。",
+      skills: ["方块飞袭", "地形重构", "王国封锁"]
+    },
+    {
+      id: "abyss-lord", name: "深渊领主", rarity: "SR", role: "术法", faction: "深渊", color: "#5b507b", accent: "#e3dded", shape: "hood",
+      baseAtk: 820, baseHp: 3100, baseDef: 220, quote: "深渊不说话，它只回响。",
+      lore: "来自毒素领域深处的术法领主。擅长削弱敌人，是第八章攻略中常见的编队核心。",
+      skills: ["暗潮", "深渊回响", "无光之门"]
+    },
+    {
+      id: "peace-warden", name: "安平守卫", rarity: "SR", role: "狂战", faction: "弱鸡村", color: "#a15f62", accent: "#f0dcdd", shape: "tusk",
+      baseAtk: 860, baseHp: 3900, baseDef: 230, quote: "平时慢一点，打起来快一点。",
+      lore: "平日温和，怒气积累后战力会迅速上涨。村民都知道，狂雷天气时最好离他远一些。",
+      skills: ["猛进", "怒气翻涌", "安平风暴"]
+    },
+    {
+      id: "sunset-steward", name: "夕阳总管", rarity: "SSR", role: "突击", faction: "霞踪阁", color: "#a64f3f", accent: "#f1d6cd", shape: "sunset",
+      baseAtk: 1180, baseHp: 4500, baseDef: 320, quote: "忠诚不是沉默，是选择。",
+      lore: "复活宝石体系的创始者。初始忠诚度很高，但面对父子关系与霞踪旧事时，更容易产生反叛。",
+      skills: ["落日斩", "余晖不灭", "总管的底线"]
+    },
+    {
+      id: "taylo-ming", name: "泰洛冥", rarity: "SSR", role: "猎手", faction: "游走者", color: "#2d6374", accent: "#d7e8eb", shape: "mask",
+      baseAtk: 1240, baseHp: 3600, baseDef: 280, quote: "我等的，是历史写错的那一刻。",
+      lore: "史书《生存纪元》记载的关键人物，曾在旧纪元终结夕阳总管。如今以游走者身份再次出现。",
+      skills: ["冥弦", "史页追猎", "终章裁定"]
+    },
+    {
+      id: "loz", name: "龙皇洛兹", rarity: "SSR", role: "守御", faction: "龙皇庭", color: "#8d6f35", accent: "#eee4c8", shape: "dragon",
+      baseAtk: 1010, baseHp: 5600, baseDef: 470, quote: "龙庭不欠任何解释。",
+      lore: "与霞踪阁主关系复杂的龙皇。兼具极高防御与稳定输出，是大型副本中可靠的前排。",
+      skills: ["龙息", "皇鳞", "龙庭降临"]
+    },
+    {
+      id: "tea-weakened", name: "茶先生·削弱", rarity: "UR", role: "规则", faction: "服务器之星", color: "#3a5751", accent: "#e2ebe8", shape: "tea",
+      baseAtk: 1600, baseHp: 6600, baseDef: 520, quote: "这杯茶，已经削弱过了。",
+      lore: "可获得的削弱版本。无限血量、无限攻击与规则之力均已取消，但仍是极稀有的人物。",
+      skills: ["温茶", "削弱领域", "一盏定局"]
+    },
+    {
+      id: "happy-queen", name: "快乐女王", rarity: "SSR", role: "辅助", faction: "快乐国", color: "#bb6a84", accent: "#f1dce4", shape: "queen",
+      baseAtk: 940, baseHp: 4200, baseDef: 300, quote: "先笑出来，办法会跟上。",
+      lore: "以高昂士气强化队伍的女王。她不回避危机，只是不允许危机夺走所有人的判断力。",
+      skills: ["欢欣光束", "女王鼓舞", "盛大庆典"]
+    }
+  ];
+
+  const stages = [
+    { id: 1, name: "王城外环", subtitle: "五名士兵", type: "普通", recommended: 3500, energy: 6, enemy: "外环卫队", enemyShape: "soldier", enemyColor: "#66746f", gold: 100000, survival: 120, exp: 320, note: "击败五名士兵，取得第一块百变魔主碎片。" },
+    { id: 2, name: "毒素领域", subtitle: "沼雾搜寻", type: "普通", recommended: 6200, energy: 7, enemy: "毒沼看守", enemyShape: "hood", enemyColor: "#587052", gold: 2400, survival: 180, exp: 460, note: "清理毒雾路径，寻找科技大脑留下的信号。" },
+    { id: 3, name: "雪域关隘", subtitle: "僵尸王前哨", type: "精英", recommended: 9600, energy: 8, enemy: "雪域僵尸王", enemyShape: "mask", enemyColor: "#55788c", gold: 3800, survival: 260, exp: 600, note: "狂雷在雪线上移动，战斗中不能只看防御。" },
+    { id: 4, name: "泡点区", subtitle: "经验争夺", type: "精英", recommended: 13800, energy: 8, enemy: "红名猎手", enemyShape: "sword", enemyColor: "#9b4b44", gold: 5200, survival: 360, exp: 820, note: "活动区内的战斗不增加罪恶值，但失败仍会消耗行动力。" },
+    { id: 5, name: "霞踪旧道", subtitle: "阁门遗迹", type: "精英", recommended: 18500, energy: 9, enemy: "霞踪影卫", enemyShape: "sunset", enemyColor: "#9c6848", gold: 6800, survival: 450, exp: 1080, note: "旧道记录着夕阳总管与复活宝石的起源。" },
+    { id: 6, name: "龙皇遗迹", subtitle: "皇庭回声", type: "首领", recommended: 23800, energy: 10, enemy: "龙皇幻影", enemyShape: "dragon", enemyColor: "#806d3b", gold: 8800, survival: 620, exp: 1360, note: "遗迹只认可足够稳固的队伍，建议携带守御人物。" },
+    { id: 7, name: "亡灵之门", subtitle: "大帝守关", type: "首领", recommended: 30000, energy: 11, enemy: "亡灵大帝", enemyShape: "crown", enemyColor: "#4d516b", gold: 12000, survival: 800, exp: 1720, note: "亡灵不会疲劳。快速积攒气，在它完成仪式前结束战斗。" },
+    { id: 8, name: "总管的底线", subtitle: "主线第八章", type: "首领", recommended: 39000, energy: 12, enemy: "夕阳总管·魔化", enemyShape: "sunset", enemyColor: "#8f302c", gold: 18000, survival: 1200, exp: 2400, note: "面对特定问题时，总管的忠诚会失控。这里没有跳过对话的选项。" },
+    { id: 9, name: "服务器之星", subtitle: "最终挑战", type: "终局", recommended: 56000, energy: 15, enemy: "人物之王", enemyShape: "king", enemyColor: "#222c2a", gold: 50000, survival: 3000, exp: 5000, note: "全部人物细胞合成体的化身。通关村只承认击败它的主公。" }
+  ];
+
+  const villages = ["新手村", "弱鸡村", "普通村", "中手村", "藏龙卧虎村", "高手村", "钻石村", "大佬村", "神佬村", "通关村"];
+
+  const archive = {
+    world: {
+      title: "世界与服务器",
+      lead: "《世界 Online》由金牛仔、板栗仔与生存仔共同维护。服务器会持续刷新人物、地图和称号，而三位长老也会以化身在世界中游走。",
+      sections: [
+        ["三位长老", "金牛仔负责游戏体验与特殊事件，板栗仔维护世界结构，生存仔管理生存币与日常运转。三人的服务器权限受到裁决大会与游戏规则共同约束。"],
+        ["语言与登录", "普通语言版本与金牛语言版本可以同服登录。正式进入前必须通过规则测试；黄金商人则使用另一套特殊语言，不能靠普通对话直接交易。"],
+        ["村落晋升", "主公从边远村落起步，必须进入秘境并击败升村首领。最终召唤并击败人物之王，才会被通关村承认。"]
+      ],
+      facts: [["初始人口", "14 万，包括士兵与工匠"], ["新手保护", "现实时间三天"], ["初始科技", "0.00000001"], ["通关条件", "击败人物之王"]]
+    },
+    characters: {
+      title: "人物与忠诚",
+      lead: "人物拥有等级、星级、气、忠诚与进化路线。重复人物会自动升星；七星后再次获得会转化为碎片。",
+      sections: [
+        ["技能体系", "每个人物拥有小招、中招、大招、必杀技与临死绝杀。原型版把小招、战技与必杀集中到回合操作中，气在战斗中积累。"],
+        ["夕阳总管", "他并非一开始就拒绝管理。高忠诚是常态，但霞踪阁、复活宝石与父子关系会让特定剧情更容易触发反叛。"],
+        ["人物之王", "全人物细胞合成体的化身。它掌握英雄池内所有技能，是通关前必须面对的最终首领。"]
+      ],
+      facts: [["最大星级", "七星"], ["编队人数", "原型版为三人"], ["忠心丸", "永久将忠诚提升至 100"], ["冥王规则", "同源者自动竞争，仅留一位"]]
+    },
+    nation: {
+      title: "国家经营",
+      lead: "每位玩家都是自己领地的主公。人口、兵力、科技与声望共同决定主城能否继续扩张。",
+      sections: [
+        ["制度", "官职、议会与指挥官由玩家自行安排。指令递归向下传达，因此高层任命会改变整个领地的生产效率。"],
+        ["科技", "世界科技指数以 0.55 作为现实参照。只要原料充足，科技提升会让农业、军备与教育自动研发对应物品。"],
+        ["防御", "玩家离线时主城不受攻击。若领地遭受重创且民众众志成城，有机会召唤愿望守护者。"]
+      ],
+      facts: [["两种货币", "金币与生存币"], ["离线规则", "主城免受玩家攻击"], ["科技大脑", "在已有人物间转移知识"], ["灵光一现", "一次跨越 0.44 科技点"]]
+    },
+    factions: {
+      title: "阵营与活动",
+      lead: "新手保护结束后，叛军会逐渐出现。阿比盖尔通常不会亲自出击，而是让投靠者执行攻击与掠夺。",
+      sections: [
+        ["叛军", "玩家可以投靠叛军，但必须上交原有人物。击杀叛军玩家不计红名，阿比盖尔会按能力重新分配资源。"],
+        ["日常事件", "天降首领、经验泡点、跨服押镖与宝箱争夺按服务器时间开放。天降狂雷会提前三秒标出区域，并无视防御扣除生命。"],
+        ["黄金商人", "商人携带稀有物品高速游走于各村。设法阻住路线后才能交易；招惹他可能致命，活动地图内则永远找不到他。"]
+      ],
+      facts: [["叛军首领", "阿比盖尔，IQ 220"], ["和平状态", "受红名规则保护"], ["活动地图", "不同村玩家不会相遇"], ["经验泡点", "19:00 至 21:00"]]
+    },
+    rules: {
+      title: "法律与裁决",
+      lead: "没有任何人物能够对抗游戏规则。规则修改必须经过玩家代表体系与服务器裁决，三位长老同样不能绕过流程。",
+      sections: [
+        ["玩家代表大会", "区、乡、市、省四级代表讨论游戏事务，下设规则、监察、论坛与攻略委员会，并有权指出服务器腐败行为。"],
+        ["服务器裁决大会", "大会在服务器之星举行，会期五天。提案需超过半数服务器同意，并获得三位长老共同通过。"],
+        ["死亡与复活", "自杀或攻击自己的角色不会产生奖励。死亡后，存活人物变成游走者；新账号击败他们后可以重新收服。复活宝石通常有五次能量。"]
+      ],
+      facts: [["红名", "针对大量击杀和平玩家"], ["裁决会期", "五天"], ["账号合并", "最多两个账号"], ["复活宝石", "每次复活消耗一格能量"]]
+    }
+  };
+
+  window.GAME_DATA = { heroes, stages, villages, archive };
+})();
