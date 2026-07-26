@@ -46,6 +46,10 @@
           <i data-lucide="zap"></i><span id="energy-value">0/0</span>
         </button>
       </div>
+      <button class="chat-toggle" id="chat-button" aria-label="打开全服聊天" title="全服聊天">
+        <i data-lucide="messages-square"></i>
+        <span class="chat-unread" id="chat-unread">2</span>
+      </button>
       <button class="profile-button" id="profile-button" aria-label="打开主公档案">
         <span class="profile-level" id="profile-level">Lv.1</span>
         <span class="profile-avatar" id="profile-avatar">主</span>
@@ -63,7 +67,7 @@
       <div class="sidebar-lower">
         <button class="mini-assistant" id="assistant-button">
           <i data-lucide="bot"></i>
-          <span><strong>挂机小助手</strong><small>初级 · 可领取</small></span>
+          <span><strong>挂机小助手</strong><small id="assistant-status">初级 · 可领取</small></span>
           <b id="idle-dot" class="status-dot"></b>
         </button>
         <button class="sidebar-action" id="settings-button"><i data-lucide="settings"></i><span>设置</span></button>
@@ -83,6 +87,7 @@
   </div>
 
   <div id="modal-root"></div>
+  <div id="chat-root"></div>
   <div id="toast-root" class="toast-root" aria-live="polite"></div>
 
   <script src="vendor/lucide.min.js"></script>

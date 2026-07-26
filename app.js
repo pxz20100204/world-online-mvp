@@ -5,6 +5,7 @@
   const STORAGE_KEY = "world-online-save-v1";
   const main = document.getElementById("main-content");
   const modalRoot = document.getElementById("modal-root");
+  const chatRoot = document.getElementById("chat-root");
   const toastRoot = document.getElementById("toast-root");
 
   const ui = {
@@ -17,6 +18,7 @@
     onboardingName: "",
     onboardingAnswers: {},
     giftResults: [],
+    chatDraft: "",
     battle: null
   };
 
@@ -50,6 +52,16 @@
       research: { progress: 0, goal: 1, claimed: false }
     },
     idleClaimAt: Date.now() - 3 * 60 * 60 * 1000,
+    chat: {
+      channel: "world",
+      language: "common",
+      unread: 2,
+      messages: [
+        { id: "welcome", channel: "world", author: "金牛哞哞", village: "服务器巡游", time: "19:02", content: "sena, tora no luma yo.", translation: "你好，欢迎进入主城。", language: "gold" },
+        { id: "team-up", channel: "world", author: "波光掠影", village: "神佬村", time: "19:06", content: "今晚泡点区有人组队吗？", language: "common" },
+        { id: "merchant", channel: "peace", author: "黄金商人", village: "游走中", time: "19:08", content: "aur-mara ka tora no tari.", translation: "黄金商人在主城等候。", language: "gold" }
+      ]
+    },
     lastSaveAt: Date.now(),
     settings: { sound: true, motion: true }
   });
@@ -66,6 +78,9 @@
         roster: Object.assign(defaultState().roster, saved.roster || {}),
         inventory: Object.assign(defaultState().inventory, saved.inventory || {}),
         tasks: Object.assign(defaultState().tasks, saved.tasks || {}),
+        chat: Object.assign(defaultState().chat, saved.chat || {}, {
+          messages: Array.isArray(saved.chat?.messages) ? saved.chat.messages : defaultState().chat.messages
+        }),
         settings: Object.assign(defaultState().settings, saved.settings || {})
       });
     } catch (error) {
@@ -105,6 +120,134 @@
     document.getElementById("energy-value").textContent = `${Math.floor(state.energy)}/${state.maxEnergy}`;
     document.getElementById("profile-level").textContent = `Lv.${state.player.level}`;
     document.getElementById("profile-avatar").textContent = state.player.name.slice(0, 1) || "主";
+    const unread = document.getElementById("chat-unread");
+    if (unread) {
+      unread.textContent = Math.min(99, state.chat.unread || 0);
+      unread.hidden = !state.chat.unread;
+    }
+    const idle = getIdleReward();
+    const idleDot = document.getElementById("idle-dot");
+    const assistantStatus = document.getElementById("assistant-status");
+    if (idleDot) idleDot.hidden = idle.hours === 0;
+    if (assistantStatus) assistantStatus.textContent = idle.hours ? `初级 · 可领取 ${idle.hours} 小时` : `初级 · ${idle.minutesUntilNext} 分钟后结算`;
+  }
+
+  function escapeHTML(value) {
+    return String(value).replace(/[&<>"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[character]));
+  }
+
+  const TAURUS_PHRASES = new Map([
+    ["有人一起打第一章吗", "sen ka zhal-un ru du-luma sa"],
+    ["今晚泡点区有人组队吗", "nava no poma-len no sen ka du-zhal sa"],
+    ["黄金商人在主城", "aur-mara ka tora no su"],
+    ["我需要帮助", "mi ka sava ru naru"],
+    ["欢迎进入主城", "tora no luma yo"],
+    ["你好", "sena"], ["谢谢", "soro"], ["不可以", "mu kai"],
+    ["黄金商人", "aur-mara"], ["人物之王", "vara-khan"], ["生存币", "suru"],
+    ["第一章", "zhal-un"], ["泡点区", "poma-len"], ["主城", "tora"], ["村落", "vila"],
+    ["我们", "mi-en"], ["大家", "sen-en"], ["人物", "vara"], ["角色", "vara"],
+    ["战斗", "zhal"], ["组队", "du-zhal"], ["召唤", "karo"], ["胜利", "dai"],
+    ["等待", "tari"], ["进入", "luma"], ["需要", "naru"], ["帮助", "sava"],
+    ["今晚", "nava"], ["一起", "du"], ["我", "mi"], ["你", "ti"], ["在", "no"],
+    ["是", "su"], ["不", "mu"], ["可以", "kai"], ["吗", "sa"]
+  ]);
+  const TAURUS_KEYS = [...TAURUS_PHRASES.keys()].sort((left, right) => right.length - left.length);
+
+  function generatedTaurusRoot(character) {
+    const code = character.codePointAt(0);
+    const consonants = ["k", "g", "t", "d", "p", "b", "m", "n", "l", "r", "s", "v", "y"];
+    const vowels = ["a", "e", "i", "o", "u"];
+    const endings = ["n", "l", "r", "s", "m"];
+    return `${consonants[code % consonants.length]}${vowels[Math.floor(code / 7) % vowels.length]}${endings[Math.floor(code / 31) % endings.length]}`;
+  }
+
+  function toTaurusLanguage(input) {
+    const source = input.trim();
+    if (!source) return "";
+    if (/^[a-zA-Z\s,.'?!-]+$/.test(source)) return source.toLowerCase();
+    if (TAURUS_PHRASES.has(source)) return `${TAURUS_PHRASES.get(source)}${source.endsWith("吗") ? "?" : "."}`;
+    const output = [];
+    let index = 0;
+    while (index < source.length) {
+      const character = source[index];
+      if (/\s/.test(character)) { index += 1; continue; }
+      if (/[，,]/.test(character)) { output.push(","); index += 1; continue; }
+      if (/[。.!！]/.test(character)) { output.push("."); index += 1; continue; }
+      if (/[？?]/.test(character)) { output.push("?"); index += 1; continue; }
+      const key = TAURUS_KEYS.find((candidate) => source.startsWith(candidate, index));
+      if (key) {
+        output.push(TAURUS_PHRASES.get(key));
+        index += key.length;
+      } else if (/\p{Script=Han}/u.test(character)) {
+        output.push(generatedTaurusRoot(character));
+        index += character.length;
+      } else {
+        output.push(character.toLowerCase());
+        index += 1;
+      }
+    }
+    return `${output.join(" ").replace(/\s+([,.?])/g, "$1")}${/[.?!]$/.test(output.at(-1) || "") ? "" : "."}`;
+  }
+
+  function renderChat() {
+    const channels = [["world", "globe-2", "全服"], ["guild", "shield", "行会"], ["peace", "handshake", "和平"]];
+    const channel = state.chat.channel || "world";
+    const messages = state.chat.messages.filter((message) => message.channel === channel);
+    const channelName = channels.find(([id]) => id === channel)?.[2] || "全服";
+    const messageHTML = messages.length ? messages.map((message) => `<article class="chat-message ${message.author === state.player.name ? "own" : ""}">
+      <div class="chat-message-meta"><strong>${escapeHTML(message.author)}</strong><span>${escapeHTML(message.village || "游走者")} · ${escapeHTML(message.time || "刚刚")}</span></div>
+      <p class="${message.language === "gold" ? "taurus-text" : ""}">${escapeHTML(message.content)}</p>
+      ${message.translation ? `<small>普通语：${escapeHTML(message.translation)}</small>` : ""}
+    </article>`).join("") : `<div class="chat-empty">${icon("radio")}<strong>${channelName}频道暂无消息</strong><span>你可以发送本频道的第一条消息。</span></div>`;
+    chatRoot.innerHTML = `<button class="chat-scrim" data-action="close-chat" aria-label="关闭聊天"></button><aside class="chat-drawer" aria-label="全服聊天">
+      <header class="chat-head"><div><span class="eyebrow">金牛一服</span><h2>全服聊天</h2></div><div class="chat-head-actions"><span class="chat-connection">本地原型</span><button class="icon-button" data-action="close-chat" aria-label="关闭聊天">${icon("x")}</button></div></header>
+      <nav class="chat-tabs" aria-label="聊天频道">${channels.map(([id, iconName, label]) => `<button class="${channel === id ? "active" : ""}" data-action="chat-channel" data-channel="${id}">${icon(iconName)} ${label}</button>`).join("")}</nav>
+      <div class="chat-messages" id="chat-messages">${messageHTML}</div>
+      <div class="chat-composer">
+        <div class="chat-language" aria-label="发送语言"><button class="${state.chat.language === "common" ? "active" : ""}" data-action="chat-language" data-language="common">普通语</button><button class="${state.chat.language === "gold" ? "active" : ""}" data-action="chat-language" data-language="gold">金牛语</button><button class="chat-language-help" data-action="open-taurus-archive" title="查看金牛语档案">${icon("circle-help")}</button></div>
+        <div class="chat-input-row"><textarea id="chat-input" rows="2" maxlength="120" placeholder="${state.chat.language === "gold" ? "输入普通语自动转换，或直接输入金牛语" : `发送到${channelName}频道`}">${escapeHTML(ui.chatDraft)}</textarea><button class="chat-send" data-action="send-chat" aria-label="发送消息" title="发送">${icon("send")}</button></div>
+      </div>
+    </aside>`;
+    refreshIcons();
+    requestAnimationFrame(() => {
+      const list = document.getElementById("chat-messages");
+      if (list) list.scrollTop = list.scrollHeight;
+    });
+  }
+
+  function openChat() {
+    state.chat.unread = 0;
+    saveState();
+    renderChat();
+    document.body.classList.add("chat-open");
+    setTimeout(() => document.getElementById("chat-input")?.focus(), 80);
+  }
+
+  function closeChat() {
+    document.body.classList.remove("chat-open");
+  }
+
+  function sendChatMessage() {
+    const input = document.getElementById("chat-input");
+    const source = (input?.value || ui.chatDraft).trim();
+    if (!source) return;
+    const isGold = state.chat.language === "gold";
+    const now = new Date();
+    state.chat.messages.push({
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      channel: state.chat.channel,
+      author: state.player.name,
+      village: villages[state.village],
+      time: `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`,
+      content: isGold ? toTaurusLanguage(source) : source,
+      translation: isGold && !/^[a-zA-Z\s,.'?!-]+$/.test(source) ? source : "",
+      language: isGold ? "gold" : "common"
+    });
+    state.chat.messages = state.chat.messages.slice(-60);
+    ui.chatDraft = "";
+    saveState();
+    renderChat();
+    document.body.classList.add("chat-open");
   }
 
   function getHero(id) {
@@ -192,6 +335,7 @@
     if (route === "heroes") renderHeroes();
     if (route === "summon") renderSummon();
     if (route === "archives") renderArchives();
+    renderChat();
     updateHeader();
     refreshIcons();
   }
@@ -402,7 +546,7 @@
   }
 
   function renderArchives() {
-    const tabs = [["world", "globe-2", "世界架构"], ["characters", "users", "人物系统"], ["nation", "landmark", "国家经营"], ["factions", "flag", "阵营活动"], ["rules", "scale", "法律裁决"]];
+    const tabs = [["world", "globe-2", "世界架构"], ["characters", "users", "人物系统"], ["nation", "landmark", "国家经营"], ["factions", "flag", "阵营活动"], ["language", "languages", "金牛语"], ["rules", "scale", "法律裁决"]];
     const lore = archive[ui.archiveTab];
     main.innerHTML = `<section class="page">
       ${pageHead("世界档案", "生存纪元", "由服务器之星持续校订的公开设定", `<span class="tag gold">馆藏版本 26.7</span>`)}
@@ -561,12 +705,28 @@
     showModal(modalShell(info[0], `<div style="display:flex;gap:14px;align-items:center"><span class="stat-icon gold" style="width:54px;height:54px">${icon(info[2])}</span><p style="margin:0;color:var(--ink-soft);font-size:11px;line-height:1.8">${info[1]}</p></div>`, `<button class="button" data-action="close-modal">知道了</button>`));
   }
 
+  function getIdleReward(now = Date.now()) {
+    const elapsed = Math.max(0, now - Number(state.idleClaimAt || now));
+    const rawHours = Math.floor(elapsed / 3600000);
+    const hours = Math.min(12, rawHours);
+    const remainder = elapsed % 3600000;
+    return {
+      hours,
+      gold: hours * 420,
+      exp: hours * 90,
+      minutesUntilNext: Math.max(1, Math.ceil((3600000 - remainder) / 60000)),
+      nextClaimAt: rawHours >= 12 ? now : Number(state.idleClaimAt || now) + hours * 3600000
+    };
+  }
+
   function showAssistant() {
-    const hours = Math.max(1, Math.min(12, Math.floor((Date.now() - state.idleClaimAt) / 3600000)));
-    const gold = hours * 420;
-    const exp = hours * 90;
-    const body = `<div style="display:flex;align-items:center;gap:14px"><span class="stat-icon" style="width:62px;height:62px">${icon("bot")}</span><div><strong style="font-size:13px">离线巡逻完成</strong><p style="margin:5px 0 0;color:var(--ink-faint);font-size:10px">初级助手工作 ${hours} 小时，最多累计 12 小时。</p></div></div><div class="reward-line" style="margin-top:18px"><span class="reward-item">${icon("coins")} ${formatNumber(gold)} 金币</span><span class="reward-item">${icon("sparkles")} ${exp} 经验</span></div>`;
-    showModal(modalShell("挂机小助手", body, `<button class="button primary" data-action="claim-idle" data-gold="${gold}" data-exp="${exp}">领取收益</button>`));
+    const reward = getIdleReward();
+    const ready = reward.hours > 0;
+    const title = ready ? "离线巡逻完成" : "巡逻进行中";
+    const note = ready ? `初级助手已结算 ${reward.hours} 个完整小时，最多累计 12 小时。` : `还需 ${reward.minutesUntilNext} 分钟结算下一小时收益。`;
+    const rewards = ready ? `<div class="reward-line" style="margin-top:18px"><span class="reward-item">${icon("coins")} ${formatNumber(reward.gold)} 金币</span><span class="reward-item">${icon("sparkles")} ${reward.exp} 经验</span></div>` : `<div class="progress" style="margin-top:18px;--value:${100 - reward.minutesUntilNext / 60 * 100}%"><span></span></div>`;
+    const body = `<div style="display:flex;align-items:center;gap:14px"><span class="stat-icon" style="width:62px;height:62px">${icon("bot")}</span><div><strong style="font-size:13px">${title}</strong><p style="margin:5px 0 0;color:var(--ink-faint);font-size:10px">${note}</p></div></div>${rewards}`;
+    showModal(modalShell("挂机小助手", body, `<button class="button ${ready ? "primary" : ""}" data-action="claim-idle" ${ready ? "" : "disabled"}>${ready ? "领取收益" : "尚未结算"}</button>`));
   }
 
   function showMerchant() {
@@ -807,6 +967,27 @@
     const actionButton = event.target.closest("[data-action]");
     if (!actionButton) return;
     const action = actionButton.dataset.action;
+    if (action === "close-chat") closeChat();
+    if (action === "chat-channel") {
+      state.chat.channel = actionButton.dataset.channel;
+      ui.chatDraft = "";
+      saveState();
+      renderChat();
+      document.body.classList.add("chat-open");
+    }
+    if (action === "chat-language") {
+      state.chat.language = actionButton.dataset.language;
+      saveState();
+      renderChat();
+      document.body.classList.add("chat-open");
+      setTimeout(() => document.getElementById("chat-input")?.focus(), 50);
+    }
+    if (action === "send-chat") sendChatMessage();
+    if (action === "open-taurus-archive") {
+      closeChat();
+      ui.archiveTab = "language";
+      setRoute("archives");
+    }
     if (action === "close-modal" || action === "battle-complete") closeModal();
     if (action === "backdrop-close" && event.target === actionButton) closeModal();
     if (action === "go-campaign") { closeModal(); setRoute("campaign"); }
@@ -868,7 +1049,17 @@
       saveState(); showOnboarding();
     }
     if (action === "enter-world") { state.initialized = true; saveState(); closeModal(); render(); toast("主城已建立，新手保护开始", "castle"); }
-    if (action === "claim-idle") { state.gold += Number(actionButton.dataset.gold); gainExp(Number(actionButton.dataset.exp)); state.idleClaimAt = Date.now(); saveState(); closeModal(); render(); toast("挂机收益已存入仓库"); }
+    if (action === "claim-idle") {
+      const reward = getIdleReward();
+      if (!reward.hours) return toast(`还需 ${reward.minutesUntilNext} 分钟结算`, "clock-3");
+      state.gold += reward.gold;
+      gainExp(reward.exp);
+      state.idleClaimAt = reward.nextClaimAt;
+      saveState();
+      closeModal();
+      render();
+      toast(`已领取 ${reward.hours} 小时挂机收益`);
+    }
     if (action === "buy-item") {
       const currency = actionButton.dataset.currency; const cost = Number(actionButton.dataset.cost); const item = actionButton.dataset.item;
       if (state[currency] < cost) return; state[currency] -= cost; state.inventory[item] += 1; saveState(); showMerchant(); toast("交易完成，物品已收入仓库", "package-check");
@@ -893,15 +1084,25 @@
 
   function handleInput(event) {
     if (event.target.id === "lord-name") ui.onboardingName = event.target.value;
+    if (event.target.id === "chat-input") ui.chatDraft = event.target.value;
+  }
+
+  function handleKeydown(event) {
+    if (event.target.id === "chat-input" && event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      sendChatMessage();
+    }
   }
 
   document.addEventListener("click", handleClick);
   document.addEventListener("change", handleChange);
   document.addEventListener("input", handleInput);
+  document.addEventListener("keydown", handleKeydown);
   window.addEventListener("hashchange", render);
   document.getElementById("mobile-menu").addEventListener("click", () => document.body.classList.toggle("menu-open"));
   document.getElementById("sidebar-scrim").addEventListener("click", () => document.body.classList.remove("menu-open"));
   document.getElementById("profile-button").addEventListener("click", showProfile);
+  document.getElementById("chat-button").addEventListener("click", openChat);
   document.getElementById("assistant-button").addEventListener("click", showAssistant);
   document.getElementById("settings-button").addEventListener("click", showSettings);
 
