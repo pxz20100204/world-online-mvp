@@ -19,6 +19,7 @@
     onboardingAnswers: {},
     giftResults: [],
     chatDraft: "",
+    guideDraft: "",
     battle: null
   };
 
@@ -45,6 +46,7 @@
     pity: 0,
     summons: 0,
     researchCount: 0,
+    createdAt: Date.now(),
     inventory: { reviveGem: 1, reviveCharges: 5, shapeshifterShard: 0, loyaltyPill: 0, spiritOrb: 0 },
     tasks: {
       battle: { progress: 0, goal: 1, claimed: false },
@@ -62,6 +64,8 @@
         { id: "merchant", channel: "peace", author: "黄金商人", village: "游走中", time: "19:08", content: "aur-mara ka tora no tari.", translation: "黄金商人在主城等候。", language: "gold" }
       ]
     },
+    guide: { messages: [], opened: false },
+    rebel: { intel: 24, adaptation: 0, activeEvent: null, history: [], lastEventAt: 0, simulationCount: 0 },
     lastSaveAt: Date.now(),
     settings: { sound: true, motion: true }
   });
@@ -86,12 +90,19 @@
       if (!raw) return defaultState();
       const saved = JSON.parse(raw);
       return Object.assign(defaultState(), saved, {
+        createdAt: saved.createdAt || saved.lastSaveAt || Date.now(),
         player: Object.assign(defaultState().player, saved.player || {}),
         roster: Object.assign(defaultState().roster, saved.roster || {}),
         inventory: Object.assign(defaultState().inventory, saved.inventory || {}),
         tasks: Object.assign(defaultState().tasks, saved.tasks || {}),
         chat: Object.assign(defaultState().chat, saved.chat || {}, {
           messages: Array.isArray(saved.chat?.messages) ? saved.chat.messages : defaultState().chat.messages
+        }),
+        guide: Object.assign(defaultState().guide, saved.guide || {}, {
+          messages: Array.isArray(saved.guide?.messages) ? saved.guide.messages.slice(-12) : []
+        }),
+        rebel: Object.assign(defaultState().rebel, saved.rebel || {}, {
+          history: Array.isArray(saved.rebel?.history) ? saved.rebel.history.slice(-8) : []
         }),
         settings: Object.assign(defaultState().settings, saved.settings || {})
       });
@@ -140,8 +151,10 @@
     const idle = getIdleReward();
     const idleDot = document.getElementById("idle-dot");
     const assistantStatus = document.getElementById("assistant-status");
+    const guideStatus = document.getElementById("guide-status");
     if (idleDot) idleDot.hidden = idle.hours === 0;
     if (assistantStatus) assistantStatus.textContent = idle.hours ? `初级 · 可领取 ${idle.hours} 小时` : `初级 · ${idle.minutesUntilNext} 分钟后结算`;
+    if (guideStatus) guideStatus.textContent = state.rebel.activeEvent && !state.rebel.activeEvent.simulation ? "IQ 300+ · 反制已就绪" : "IQ 300+ · 分析完成";
   }
 
   function escapeHTML(value) {
@@ -599,21 +612,380 @@
     return `通关第 ${state.village} 章后晋升`;
   }
 
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const REBEL_COOLDOWN_MS = 4 * 60 * 60 * 1000;
+
+  function durationLabel(milliseconds) {
+    const totalHours = Math.max(1, Math.ceil(milliseconds / 3600000));
+    const days = Math.floor(totalHours / 24);
+    const hours = totalHours % 24;
+    return days ? `${days} 天${hours ? ` ${hours} 小时` : ""}` : `${hours} 小时`;
+  }
+
+  function protectionStatus() {
+    const elapsed = Math.max(0, Date.now() - state.createdAt);
+    const remaining = Math.max(0, DAY_MS * 3 - elapsed);
+    return {
+      active: remaining > 0,
+      day: Math.min(3, Math.floor(elapsed / DAY_MS) + 1),
+      remaining,
+      label: remaining > 0 ? `剩余 ${durationLabel(remaining)}` : "保护已结束"
+    };
+  }
+
+  function currentTargetStage() {
+    return stages[Math.min(state.stageProgress, stages.length - 1)];
+  }
+
+  function guideAnalysis() {
+    const stage = currentTargetStage();
+    const power = teamPower();
+    const powerRatio = Math.round(power / stage.recommended * 100);
+    const readyTasks = Object.values(state.tasks).filter((task) => task.progress >= task.goal && !task.claimed).length;
+    const protection = protectionStatus();
+    const liveRebelEvent = state.rebel.activeEvent && !state.rebel.activeEvent.simulation;
+    let analysis = {
+      priority: "主线推进",
+      title: `挑战第 ${stage.id} 章 · ${stage.name}`,
+      summary: `队伍战力达到推荐值的 ${powerRatio}%，行动力足够。现在推进主线的综合收益最高。`,
+      action: "campaign",
+      actionLabel: "前往主线",
+      confidence: Math.min(98, 88 + Math.floor(powerRatio / 25))
+    };
+    if (liveRebelEvent) {
+      analysis = {
+        priority: "领地威胁",
+        title: "先处理阿比盖尔的行动",
+        summary: `叛军正在针对${liveRebelEvent.targetLabel}设局。继续推进主线会暴露后方，建议先完成反制。`,
+        action: "rebel",
+        actionLabel: "处理叛军事件",
+        confidence: 99
+      };
+    } else if (state.team.length < 3) {
+      analysis = {
+        priority: "编队缺口",
+        title: "补齐第三个出战位",
+        summary: `当前只有 ${state.team.length} 人出战。补齐编队比单独升级任一人物更能提高容错。`,
+        action: Object.keys(state.roster).length > state.team.length ? "heroes" : "summon",
+        actionLabel: Object.keys(state.roster).length > state.team.length ? "调整编队" : "前往召唤",
+        confidence: 98
+      };
+    } else if (powerRatio < 90) {
+      analysis = {
+        priority: "战力缺口",
+        title: `暂缓第 ${stage.id} 章，先强化队伍`,
+        summary: `当前 ${formatNumber(power)} 战力仅为推荐值 ${formatNumber(stage.recommended)} 的 ${powerRatio}%。优先升级最弱人物可减少行动力浪费。`,
+        action: "heroes",
+        actionLabel: "强化人物",
+        confidence: 96
+      };
+    } else if (state.energy < stage.energy) {
+      analysis = {
+        priority: "行动力管理",
+        title: "停止出征，转入主城经营",
+        summary: `第 ${stage.id} 章需要 ${stage.energy} 行动力，当前仅有 ${Math.floor(state.energy)}。此时研发或整理阵容不会浪费副本收益。`,
+        action: state.gold >= 800 ? "research" : "assistant",
+        actionLabel: state.gold >= 800 ? "查看研究所" : "查看挂机收益",
+        confidence: 97
+      };
+    } else if (readyTasks) {
+      analysis = {
+        priority: "即时收益",
+        title: `先领取 ${readyTasks} 项已完成委托`,
+        summary: "奖励已经满足领取条件，不需要额外消耗资源；领取后再决定升级或召唤。",
+        action: "home",
+        actionLabel: "返回委托",
+        confidence: 100
+      };
+    } else if (!state.tasks.research.progress && state.gold >= 800) {
+      analysis = {
+        priority: "低成本增长",
+        title: "完成今日首次科技研发",
+        summary: `投入 800 金币可同时推进任务、人口和兵力，当前余额 ${formatNumber(state.gold)}，不会阻断人物升级。`,
+        action: "research",
+        actionLabel: "查看研究所",
+        confidence: 94
+      };
+    }
+    return Object.assign(analysis, {
+      stage,
+      power,
+      powerRatio,
+      protection,
+      readyTasks
+    });
+  }
+
+  function pushGuideMessage(role, text) {
+    state.guide.messages.push({ role, text, at: Date.now() });
+    state.guide.messages = state.guide.messages.slice(-12);
+  }
+
+  function guideAnswer(topic) {
+    const query = topic.toLocaleLowerCase();
+    const analysis = guideAnalysis();
+    if (/叛军|阿比盖尔|rebel/.test(query)) {
+      const event = state.rebel.activeEvent;
+      if (event) {
+        const predicted = event.options.find((option) => option.id === event.predictedStrategy);
+        const best = event.options.find((option) => option.id === event.bestStrategy);
+        return `阿比盖尔的模型会优先防备“${predicted.label}”。反制选择“${best.label}”：${best.detail}。这是根据她的 IQ 220 行为模型和你过去 ${state.rebel.history.length} 次选择反推的结果。`;
+      }
+      if (analysis.protection.active) return `新手保护还剩 ${durationLabel(analysis.protection.remaining)}。叛军不能造成真实损失，现在最划算的是先做情报推演，积累反制样本。`;
+      return `当前没有正在执行的叛军行动。阿比盖尔会优先攻击你最依赖的资源，而不是数值最低的资源；保留至少两套应对方式，避免形成可预测习惯。`;
+    }
+    if (/阵容|人物|战力|team|hero/.test(query)) {
+      const members = state.team.map((id) => getHero(id));
+      const weakest = state.team.slice().sort((left, right) => heroPower(left) - heroPower(right))[0];
+      const roles = [...new Set(members.map((hero) => hero.role))];
+      return `当前 ${state.team.length} 人编队总战力 ${formatNumber(analysis.power)}，覆盖 ${roles.join("、")}。下一章推荐 ${formatNumber(analysis.stage.recommended)}。最弱位是${getHero(weakest).name}，优先升级它能最快缩小队内断层。`;
+    }
+    if (/资源|金币|生存币|科技|resource|gold/.test(query)) {
+      const researchAffordable = Math.floor(state.gold / 800);
+      return `你有 ${formatNumber(state.gold)} 金币、${formatNumber(state.survival)} 生存币和 ${Math.floor(state.energy)} 行动力。金币最多支持 ${researchAffordable} 次基础研发；生存币可进行 ${Math.floor(state.survival / 200)} 次单抽。当前建议先保留一轮人物升级费用，再动用其余资源。`;
+    }
+    if (/主线|下一步|怎么做|next|campaign/.test(query)) {
+      return `${analysis.title}。${analysis.summary} 我的置信度为 ${analysis.confidence}%，依据是战力、行动力、即时任务和领地威胁的联合排序。`;
+    }
+    return `我可以分析“下一步”“阵容”“资源”或“叛军”。当前最高优先级是：${analysis.title}。${analysis.summary}`;
+  }
+
+  function showGuide() {
+    document.body.classList.remove("menu-open");
+    const analysis = guideAnalysis();
+    if (!state.guide.messages.length) {
+      pushGuideMessage("assistant", `主公，我是小金牛仔。已读取你的队伍、资源、任务与领地情报。当前判断：${analysis.title}。`);
+    }
+    state.guide.opened = true;
+    saveState();
+    const conversation = state.guide.messages.map((message) => `<div class="guide-message ${message.role}"><strong>${message.role === "assistant" ? "小金牛仔" : escapeHTML(state.player.name)}</strong><p>${escapeHTML(message.text)}</p></div>`).join("");
+    const body = `<div class="guide-console">
+      <section class="guide-identity"><span class="guide-avatar">${icon("brain-circuit")}</span><div><span class="eyebrow">服务器策略 AI</span><h3>小金牛仔</h3><p>三长老决策模型 · 设定 IQ 300+</p></div><span class="tag teal">在线</span></section>
+      <section class="guide-decision"><div><span class="decision-priority">${analysis.priority}</span><h3>${analysis.title}</h3><p>${analysis.summary}</p></div><div class="confidence-ring" style="--confidence:${analysis.confidence * 3.6}deg"><strong>${analysis.confidence}%</strong><small>置信度</small></div></section>
+      <div class="guide-metrics"><span>队伍<strong>${formatNumber(analysis.power)}</strong></span><span>下章匹配<strong>${analysis.powerRatio}%</strong></span><span>叛军情报<strong>${state.rebel.intel}</strong></span><span>阿比盖尔适应<strong>${Math.min(99, state.rebel.adaptation * 8)}%</strong></span></div>
+      <div class="guide-prompts"><button data-action="ask-guide" data-topic="下一步">下一步</button><button data-action="ask-guide" data-topic="阵容">阵容</button><button data-action="ask-guide" data-topic="资源">资源</button><button data-action="ask-guide" data-topic="叛军">叛军</button></div>
+      <div class="guide-conversation" id="guide-conversation">${conversation}</div>
+      <div class="guide-input-row"><input id="guide-input" maxlength="80" value="${escapeHTML(ui.guideDraft)}" placeholder="向小金牛仔提问"><button class="icon-button" data-action="send-guide" aria-label="发送问题">${icon("arrow-up")}</button></div>
+    </div>`;
+    showModal(modalShell("小金牛仔 AI 导引", body, `<button class="button" data-action="close-modal">关闭</button><button class="button primary" data-action="execute-guide">${icon("navigation")} ${analysis.actionLabel}</button>`), "large guide-modal");
+    requestAnimationFrame(() => {
+      const conversationElement = document.getElementById("guide-conversation");
+      if (conversationElement) conversationElement.scrollTop = conversationElement.scrollHeight;
+    });
+  }
+
+  function askGuide(topic) {
+    const question = (topic || ui.guideDraft).trim();
+    if (!question) return;
+    pushGuideMessage("user", question);
+    pushGuideMessage("assistant", guideAnswer(question));
+    ui.guideDraft = "";
+    saveState();
+    showGuide();
+  }
+
+  function executeGuideAdvice() {
+    const action = guideAnalysis().action;
+    closeModal();
+    if (action === "rebel") return showRebelEvent();
+    if (action === "heroes") return setRoute("heroes");
+    if (action === "summon") return setRoute("summon");
+    if (action === "campaign") return setRoute("campaign");
+    if (action === "assistant") return showAssistant();
+    setRoute("home");
+    if (action === "research") toast("研究所已定位，确认后再投入金币", "microscope");
+    if (action === "home") toast("已完成委托位于主城下方", "list-checks");
+  }
+
+  function rebelTargetProfile() {
+    const profiles = [
+      { id: "treasury", label: "金币与商路", score: state.gold / 1200 + state.researchCount * 1.8 },
+      { id: "garrison", label: "主城驻军", score: state.troops / 650 + teamPower() / 4200 },
+      { id: "reputation", label: "民众信任", score: state.reputation / 5 + state.population / 65000 },
+      { id: "momentum", label: "主线节奏", score: state.stageProgress * 1.7 + (state.maxEnergy - state.energy) / 18 }
+    ].sort((left, right) => right.score - left.score);
+    const previousTarget = state.rebel.history.at(-1)?.target;
+    if (state.rebel.adaptation >= 2 && profiles[0].id === previousTarget) return profiles[1];
+    return profiles[0];
+  }
+
+  function buildRebelEvent(simulation) {
+    const target = rebelTargetProfile();
+    const templates = {
+      treasury: {
+        title: "赈济商队的第七码头",
+        clue: `叛军同时放出三份假税单，目标不是偷走现有 ${formatNumber(state.gold)} 金币，而是让主城主动关闭最赚钱的商路。`,
+        baseBest: "deception",
+        options: [
+          { id: "force", label: "封锁全部仓道", detail: "用兵力立刻切断所有货物流动。" },
+          { id: "deception", label: "放出带暗记的假商队", detail: "允许假税单继续流转，追踪最终接货人。" },
+          { id: "discipline", label: "分仓逐笔复核", detail: "保留商路，仅暂停无法核验的批次。" }
+        ]
+      },
+      garrison: {
+        title: "城外出现两面同源军旗",
+        clue: `阿比盖尔知道你依赖 ${formatNumber(state.troops)} 驻军与主力队伍，正用投靠者诱使精锐离开城门。`,
+        baseBest: "discipline",
+        options: [
+          { id: "force", label: "全军追击假旗", detail: "以速度消灭城外可见目标。" },
+          { id: "deception", label: "伪造空城调令", detail: "故意暴露一条看似失守的通道。" },
+          { id: "discipline", label: "守门并轮换侦察", detail: "主力不动，只派不同小队交叉验证。" }
+        ]
+      },
+      reputation: {
+        title: "主城出现伪造的投降名单",
+        clue: `名单专挑高声望人物签名，企图让 ${formatNumber(state.population)} 人先互相怀疑，再由叛军收买失望者。`,
+        baseBest: "discipline",
+        options: [
+          { id: "force", label: "抓捕所有传播者", detail: "用强制手段迅速压下名单。" },
+          { id: "deception", label: "反投一份假名单", detail: "制造第二份名单扰乱叛军联系人。" },
+          { id: "discipline", label: "公开可核验账册", detail: "让每个签名与物资流向接受交叉核验。" }
+        ]
+      },
+      momentum: {
+        title: "主线入口出现撤退信号",
+        clue: `叛军判断你会保持第 ${currentTargetStage().id} 章推进速度，故意制造短暂空档引你在后勤未稳时出城。`,
+        baseBest: "deception",
+        options: [
+          { id: "force", label: "立即出城决战", detail: "趁信号尚未消失抢占入口。" },
+          { id: "deception", label: "假装行动力耗尽", detail: "让叛军误判主力无法出动，再截断撤离线。" },
+          { id: "discipline", label: "暂停主线加固后勤", detail: "放弃窗口，稳住补给后再推进。" }
+        ]
+      }
+    };
+    const template = templates[target.id];
+    const previousStrategy = state.rebel.history.at(-1)?.strategy;
+    const predictedStrategy = previousStrategy || "force";
+    let bestStrategy = template.baseBest;
+    if (bestStrategy === predictedStrategy) bestStrategy = predictedStrategy === "discipline" ? "deception" : "discipline";
+    return {
+      id: `rebel-${Date.now()}`,
+      title: template.title,
+      target: target.id,
+      targetLabel: target.label,
+      clue: template.clue,
+      options: template.options,
+      predictedStrategy,
+      bestStrategy,
+      simulation,
+      createdAt: Date.now()
+    };
+  }
+
+  function rebelCooldown() {
+    return Math.max(0, state.rebel.lastEventAt + REBEL_COOLDOWN_MS - Date.now());
+  }
+
+  function rebelBrief() {
+    const protection = protectionStatus();
+    if (state.rebel.activeEvent) return {
+      title: state.rebel.activeEvent.title,
+      detail: state.rebel.activeEvent.simulation ? "保护期战术推演等待决策" : `叛军正在攻击${state.rebel.activeEvent.targetLabel}`,
+      state: state.rebel.activeEvent.simulation ? "推演" : "紧急"
+    };
+    const cooldown = rebelCooldown();
+    if (cooldown) return { title: "阿比盖尔正在重新评估", detail: `下一份叛军情报预计 ${durationLabel(cooldown)} 后出现`, state: "追踪中" };
+    if (protection.active) return { title: "截获叛军加密调令", detail: `新手保护${protection.label}，可进行无损战术推演`, state: "可推演" };
+    return { title: "叛军投靠者接近领地", detail: "阿比盖尔已根据你的发展记录选择攻击目标", state: "待处理" };
+  }
+
+  function showRebelEvent() {
+    const cooldown = rebelCooldown();
+    if (!state.rebel.activeEvent && cooldown) {
+      const last = state.rebel.history.at(-1);
+      const body = `<div class="rebel-cooldown"><span class="stat-icon red">${icon("scan-search")}</span><h3>叛军暂时失去踪迹</h3><p>阿比盖尔正在根据上一轮“${last?.choiceLabel || "未知行动"}”重新训练应对模型。预计 ${durationLabel(cooldown)} 后出现新情报。</p><div class="guide-metrics"><span>情报值<strong>${state.rebel.intel}</strong></span><span>适应度<strong>${Math.min(99, state.rebel.adaptation * 8)}%</strong></span></div></div>`;
+      return showModal(modalShell("叛军情报", body, `<button class="button" data-action="close-modal">关闭</button><button class="button primary" data-action="open-guide">${icon("brain-circuit")} 询问小金牛仔</button>`));
+    }
+    if (!state.rebel.activeEvent) {
+      state.rebel.activeEvent = buildRebelEvent(protectionStatus().active);
+      saveState();
+      render();
+    }
+    const rebelEvent = state.rebel.activeEvent;
+    const options = rebelEvent.options.map((option, index) => `<button class="rebel-option" data-action="resolve-rebel" data-strategy="${option.id}"><span>${index + 1}</span><div><strong>${option.label}</strong><small>${option.detail}</small></div>${icon("chevron-right")}</button>`).join("");
+    const body = `<div class="rebel-event">
+      <section class="rebel-identity"><span class="rebel-mark">A</span><div><span class="eyebrow">叛军首领决策模型</span><h3>阿比盖尔 · 设定 IQ 220</h3><p>本人未出击，由投靠者执行 · 已读取你的发展倾向</p></div><span class="tag red">${rebelEvent.simulation ? "保护期推演" : "真实事件"}</span></section>
+      <div class="rebel-intel"><span>${icon("crosshair")} 攻击目标：${rebelEvent.targetLabel}</span><span>${icon("history")} 历史样本：${state.rebel.history.length}</span><span>${icon("activity")} 适应度：${Math.min(99, state.rebel.adaptation * 8)}%</span></div>
+      <section class="rebel-briefing"><span class="decision-priority">截获调令</span><h3>${rebelEvent.title}</h3><p>${rebelEvent.clue}</p><div class="rebel-warning">${icon("eye")} 阿比盖尔已经预测了你最可能选择的方案，但情报中没有写明是哪一个。</div></section>
+      <div class="rebel-options">${options}</div>
+    </div>`;
+    showModal(modalShell(rebelEvent.simulation ? "叛军战术推演" : "叛军事件", body, `<button class="button" data-action="close-modal">暂不决定</button><button class="button primary" data-action="ask-guide" data-topic="叛军">${icon("brain-circuit")} 请求 AI 反制</button>`), "large rebel-modal");
+  }
+
+  function resolveRebelEvent(strategy) {
+    const rebelEvent = state.rebel.activeEvent;
+    const choice = rebelEvent?.options.find((option) => option.id === strategy);
+    if (!rebelEvent || !choice) return;
+    const predictedChoice = rebelEvent.options.find((option) => option.id === rebelEvent.predictedStrategy);
+    const bestChoice = rebelEvent.options.find((option) => option.id === rebelEvent.bestStrategy);
+    const success = strategy === rebelEvent.bestStrategy;
+    const predicted = strategy === rebelEvent.predictedStrategy;
+    let title;
+    let outcome;
+    let result;
+    if (rebelEvent.simulation) {
+      const intelGain = success ? 8 : predicted ? 2 : 4;
+      state.rebel.intel += intelGain;
+      state.rebel.simulationCount += 1;
+      title = success ? "推演反制成功" : predicted ? "推演落入预判" : "推演形成僵持";
+      outcome = `保护规则阻止了全部资源损失。情报值 +${intelGain}。阿比盖尔预判的是“${predictedChoice.label}”，小金牛仔计算出的反制是“${bestChoice.label}”。`;
+      result = success ? "success" : predicted ? "predicted" : "neutral";
+    } else if (success) {
+      const reward = 500 + state.rebel.adaptation * 80;
+      state.gold += reward;
+      state.reputation += 4;
+      state.rebel.intel += 12;
+      title = "反制成功 · 捕获叛军联络线";
+      outcome = `你绕过了阿比盖尔的首轮预判，缴获 ${formatNumber(reward)} 金币，声望 +4，情报值 +12。`;
+      result = "success";
+    } else if (predicted) {
+      const goldLoss = Math.min(state.gold, Math.max(240, Math.floor(state.gold * .08)));
+      const troopLoss = Math.min(state.troops, Math.max(45, Math.floor(state.troops * .06)));
+      state.gold -= goldLoss;
+      state.troops -= troopLoss;
+      state.reputation = Math.max(0, state.reputation - 2);
+      state.rebel.intel += 2;
+      title = "阿比盖尔完成二次设伏";
+      outcome = `她等待的正是“${predictedChoice.label}”。你损失 ${formatNumber(goldLoss)} 金币、${formatNumber(troopLoss)} 兵力和 2 声望，但获得 2 点反制情报。`;
+      result = "predicted";
+    } else {
+      const troopLoss = Math.min(state.troops, Math.max(20, Math.floor(state.troops * .025)));
+      state.troops -= troopLoss;
+      state.rebel.intel += 5;
+      title = "双方脱离接触";
+      outcome = `你的选择没有落入主要预判，但也未切断联络线。损失 ${formatNumber(troopLoss)} 兵力，情报值 +5。最佳反制原本是“${bestChoice.label}”。`;
+      result = "neutral";
+    }
+    state.rebel.adaptation = Math.min(12, state.rebel.adaptation + 1);
+    state.rebel.history.push({ target: rebelEvent.target, strategy, choiceLabel: choice.label, result, at: Date.now() });
+    state.rebel.history = state.rebel.history.slice(-8);
+    state.rebel.lastEventAt = Date.now();
+    state.rebel.activeEvent = null;
+    pushGuideMessage("assistant", `叛军复盘：${title}。${outcome}`);
+    saveState();
+    render();
+    const body = `<div class="rebel-result ${result}"><span class="stat-icon ${result === "success" ? "" : "red"}">${icon(result === "success" ? "shield-check" : result === "predicted" ? "scan-eye" : "shield")}</span><h3>${title}</h3><p>${outcome}</p><div class="rebel-reveal"><strong>IQ 对抗记录</strong><span>阿比盖尔预测：${predictedChoice.label}</span><span>小金牛仔反制：${bestChoice.label}</span><span>你的选择：${choice.label}</span></div></div>`;
+    showModal(modalShell("叛军事件复盘", body, `<button class="button" data-action="close-modal">返回主城</button><button class="button primary" data-action="open-guide">${icon("brain-circuit")} 查看后续建议</button>`));
+  }
+
   function renderHome() {
     const promotion = canPromote();
     const currentVillage = villages[state.village];
     const nextVillage = villages[Math.min(9, state.village + 1)];
+    const protection = protectionStatus();
+    const rebel = rebelBrief();
+    const advice = guideAnalysis();
     main.innerHTML = `<section class="page home-page">
-      ${pageHead("领地总览", `${state.player.name}的主城`, `${currentVillage} · 新手保护第 1 日 · 当前天气：薄雾`, `<button class="button" data-action="share-game">${icon("share-2")}<span>分享游戏</span></button><button class="button" data-action="open-profile">${icon("scroll-text")}<span>主公档案</span></button><button class="button primary" data-action="go-campaign">${icon("swords")}<span>继续主线</span></button>`)}
+      ${pageHead("领地总览", `${state.player.name}的主城`, `${currentVillage} · ${protection.active ? `新手保护第 ${protection.day} 日` : "开放领地"} · 当前天气：薄雾`, `<button class="button" data-action="share-game">${icon("share-2")}<span>分享游戏</span></button><button class="button" data-action="open-guide">${icon("brain-circuit")}<span>AI 导引</span></button><button class="button primary" data-action="go-campaign">${icon("swords")}<span>继续主线</span></button>`)}
       <div class="home-grid">
         <div class="home-main">
           <section class="panel world-map" aria-label="领地地图">
-            <div class="map-bar"><div class="map-title"><strong>龙城北境 · 领地 07</strong><small>领土稳定，未检测到玩家入侵</small></div><div class="weather-chip">${icon("cloud-sun")} 薄雾 18°C</div></div>
+            <div class="map-bar"><div class="map-title"><strong>龙城北境 · 领地 07</strong><small>${protection.active ? `保护规则生效 · ${protection.label}` : `叛军威胁适应度 ${Math.min(99, state.rebel.adaptation * 8)}%`}</small></div><div class="weather-chip">${icon("cloud-sun")} 薄雾 18°C</div></div>
             <button class="map-node merchant" style="left:23%;top:28%" data-action="merchant"><span class="node-icon">${icon("store")}</span><strong>黄金商人</strong><small>停留 13:24</small></button>
-            <button class="map-node main-city" style="left:43%;top:50%" data-action="open-profile"><span class="node-icon">${icon("castle")}</span><strong>${state.player.name}的主城</strong><small>保护中</small></button>
+            <button class="map-node main-city" style="left:43%;top:50%" data-action="open-profile"><span class="node-icon">${icon("castle")}</span><strong>${state.player.name}的主城</strong><small>${protection.active ? "保护中" : "开放领地"}</small></button>
             <button class="map-node battle" style="left:71%;top:34%" data-action="go-campaign"><span class="node-icon">${icon("swords")}</span><strong>${stages[Math.min(state.stageProgress, 8)].name}</strong><small>主线可挑战</small></button>
             <button class="map-node ${state.stageProgress < 2 ? "locked" : ""}" style="left:78%;top:72%" data-action="archive-faction"><span class="node-icon">${icon("landmark")}</span><strong>霞踪遗迹</strong><small>${state.stageProgress < 2 ? "尚未探明" : "可调查"}</small></button>
-            <div class="map-alert"><span class="alert-icon">${icon("cloud-lightning")}</span><div><strong>天降狂雷预警</strong><small>北境将在 02:48 后出现雷区，无视防御扣除 20% 生命</small></div><button class="button small" data-action="dismiss-alert">${icon("map-pin")}<span>查看位置</span></button></div>
+            <div class="map-alert rebel-alert"><span class="alert-icon">${icon(protection.active ? "shield-alert" : "siren")}</span><div><strong>${rebel.title}</strong><small>${rebel.detail}</small></div><button class="button small ${protection.active ? "" : "danger"}" data-action="open-rebel">${icon("scan-search")}<span>${rebel.state}</span></button></div>
           </section>
           <div class="stats-row">
             <div class="stat-tile"><span class="stat-icon">${icon("users")}</span><div><small>领地人口</small><strong>${formatNumber(state.population)}</strong></div></div>
@@ -621,6 +993,12 @@
             <div class="stat-tile"><span class="stat-icon blue">${icon("microscope")}</span><div><small>科技指数</small><strong>${state.tech < .001 ? state.tech.toFixed(8) : state.tech.toFixed(4)}</strong></div></div>
             <div class="stat-tile"><span class="stat-icon red">${icon("flag")}</span><div><small>村落声望</small><strong>${state.reputation}</strong></div></div>
           </div>
+          <section class="panel ai-brief">
+            <div class="ai-brief-mark">${icon("brain-circuit")}</div>
+            <div class="ai-brief-copy"><span class="eyebrow">小金牛仔 · IQ 300+ 策略模型</span><h2>${advice.title}</h2><p>${advice.summary}</p></div>
+            <div class="ai-brief-score"><strong>${advice.confidence}%</strong><small>置信度</small></div>
+            <button class="button primary" data-action="open-guide">${icon("message-square-more")} 展开分析</button>
+          </section>
           <section class="panel">
             <div class="panel-head"><div><h2>今日委托</h2><p>服务器每日 05:00 刷新</p></div><span class="tag teal">完成 ${Object.values(state.tasks).filter((task) => task.claimed).length}/3</span></div>
             <div class="task-list">
@@ -654,9 +1032,9 @@
             <div class="panel-head"><div><h2>服务器事件</h2><p>金牛一服</p></div><span class="status-dot"></span></div>
             <div class="panel-body" style="padding-top:6px;padding-bottom:6px">
               <div class="event-list">
+                <button class="event-row event-action" data-action="open-rebel"><span class="event-time">${rebel.state}</span><div><strong>${rebel.title}</strong><small>${rebel.detail}</small></div><span class="event-state rebel-state">IQ 220</span></button>
                 <div class="event-row"><span class="event-time">19:00</span><div><strong>经验泡点</strong><small>双倍经验区开放</small></div><span class="event-state">今晚</span></div>
                 <div class="event-row"><span class="event-time">周六</span><div><strong>天降首领</strong><small>将降临主城外环</small></div><span class="event-state">预告</span></div>
-                <div class="event-row"><span class="event-time">进行中</span><div><strong>黄金商人</strong><small>出现在领地西北</small></div><span class="event-state">13:24</span></div>
               </div>
             </div>
           </section>
@@ -1220,6 +1598,12 @@
     if (action === "go-heroes") { closeModal(); setRoute("heroes"); }
     if (action === "go-summon") { closeModal(); setRoute("summon"); }
     if (action === "open-profile") showProfile();
+    if (action === "open-guide") showGuide();
+    if (action === "ask-guide") askGuide(actionButton.dataset.topic || "");
+    if (action === "send-guide") askGuide(ui.guideDraft);
+    if (action === "execute-guide") executeGuideAdvice();
+    if (action === "open-rebel") showRebelEvent();
+    if (action === "resolve-rebel") resolveRebelEvent(actionButton.dataset.strategy);
     if (action === "share-game") showShareGame();
     if (action === "copy-share-link") copyShareLink();
     if (action === "native-share") nativeShareGame();
@@ -1274,7 +1658,7 @@
       if (preferred && state.team.length < 3) state.team.push(preferred.hero.id);
       saveState(); showOnboarding();
     }
-    if (action === "enter-world") { state.initialized = true; saveState(); closeModal(); render(); toast("主城已建立，新手保护开始", "castle"); }
+    if (action === "enter-world") { state.initialized = true; saveState(); closeModal(); render(); toast("主城已建立，小金牛仔 AI 已上线", "brain-circuit"); }
     if (action === "claim-idle") {
       const reward = getIdleReward();
       if (!reward.hours) return toast(`还需 ${reward.minutesUntilNext} 分钟结算`, "clock-3");
@@ -1311,12 +1695,17 @@
   function handleInput(event) {
     if (event.target.id === "lord-name") ui.onboardingName = event.target.value;
     if (event.target.id === "chat-input") ui.chatDraft = event.target.value;
+    if (event.target.id === "guide-input") ui.guideDraft = event.target.value;
   }
 
   function handleKeydown(event) {
     if (event.target.id === "chat-input" && event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       sendChatMessage();
+    }
+    if (event.target.id === "guide-input" && event.key === "Enter") {
+      event.preventDefault();
+      askGuide(ui.guideDraft);
     }
   }
 
@@ -1329,6 +1718,7 @@
   document.getElementById("sidebar-scrim").addEventListener("click", () => document.body.classList.remove("menu-open"));
   document.getElementById("profile-button").addEventListener("click", showProfile);
   document.getElementById("chat-button").addEventListener("click", openChat);
+  document.getElementById("guide-button").addEventListener("click", showGuide);
   document.getElementById("assistant-button").addEventListener("click", showAssistant);
   document.getElementById("settings-button").addEventListener("click", showSettings);
 
