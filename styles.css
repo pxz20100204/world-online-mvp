@@ -107,6 +107,9 @@ body.chat-open .toast-root { right: 410px; }
 .chat-head h2 { margin: 0; font: 700 17px/1.2 Georgia, "Microsoft YaHei UI", serif; }
 .chat-head-actions { display: flex; align-items: center; gap: 8px; }
 .chat-connection { min-height: 22px; padding: 0 7px; display: inline-flex; align-items: center; color: #866126; border-radius: 3px; background: var(--gold-soft); font-size: 8px; font-weight: 800; }
+.chat-connection.online { color: var(--teal-dark); background: #d9ebe7; }
+.chat-connection.connecting { color: var(--blue); background: #dce8ed; }
+.chat-connection.offline { color: #87392f; background: var(--red-soft); }
 .chat-tabs { min-height: 45px; padding: 6px 9px; flex: 0 0 auto; display: grid; grid-template-columns: repeat(3,1fr); gap: 4px; border-bottom: 1px solid var(--line); background: #f1f0ea; }
 .chat-tabs button { border: 0; border-radius: 4px; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--ink-faint); background: transparent; cursor: pointer; font-size: 9px; }
 .chat-tabs button.active { color: var(--teal-dark); background: var(--surface); box-shadow: 0 1px 4px rgba(29,39,37,.1); font-weight: 800; }

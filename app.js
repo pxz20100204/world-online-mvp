@@ -67,6 +67,18 @@
   });
 
   let state = loadState();
+  let realtimeClient = null;
+  let realtimeUserId = null;
+  let realtimeSubscription = null;
+  let realtimeStatus = "local";
+  let chatSending = false;
+
+  const supabaseConfig = window.SUPABASE_CONFIG || {};
+  const realtimeConfigured = Boolean(
+    supabaseConfig.url &&
+    supabaseConfig.anonKey &&
+    window.supabase?.createClient
+  );
 
   function loadState() {
     try {
@@ -189,6 +201,72 @@
     return `${output.join(" ").replace(/\s+([,.?])/g, "$1")}${/[.?!]$/.test(output.at(-1) || "") ? "" : "."}`;
   }
 
+  function realtimeMessage(row) {
+    const date = new Date(row.created_at);
+    return {
+      id: row.id,
+      channel: row.channel,
+      author: row.author,
+      village: row.village,
+      time: Number.isNaN(date.getTime()) ? "刚刚" : `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`,
+      content: row.content,
+      translation: row.translation || "",
+      language: row.language,
+      remote: true
+    };
+  }
+
+  function appendRealtimeMessage(row, countUnread = false) {
+    if (state.chat.messages.some((message) => message.id === row.id)) return;
+    state.chat.messages.push(realtimeMessage(row));
+    state.chat.messages = state.chat.messages.slice(-80);
+    if (countUnread && !document.body.classList.contains("chat-open")) state.chat.unread = (state.chat.unread || 0) + 1;
+    saveState();
+    renderChat();
+  }
+
+  async function connectRealtimeChat() {
+    if (!realtimeConfigured || realtimeClient) return;
+    realtimeStatus = "connecting";
+    renderChat();
+    realtimeClient = window.supabase.createClient(supabaseConfig.url, supabaseConfig.anonKey, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
+    });
+    try {
+      let { data: sessionData, error: sessionError } = await realtimeClient.auth.getSession();
+      if (sessionError) throw sessionError;
+      if (!sessionData.session) {
+        const result = await realtimeClient.auth.signInAnonymously();
+        if (result.error) throw result.error;
+        sessionData = result.data;
+      }
+      realtimeUserId = sessionData.session?.user?.id || sessionData.user?.id;
+      if (!realtimeUserId) throw new Error("Anonymous session did not return a user id");
+
+      const history = await realtimeClient
+        .from("world_messages")
+        .select("id,user_id,channel,author,village,content,translation,language,created_at")
+        .order("created_at", { ascending: false })
+        .limit(80);
+      if (history.error) throw history.error;
+      state.chat.messages = (history.data || []).reverse().map(realtimeMessage);
+      saveState();
+
+      realtimeSubscription = realtimeClient
+        .channel("world-messages-live")
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "world_messages" }, (payload) => appendRealtimeMessage(payload.new, true))
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") realtimeStatus = "online";
+          if (["CHANNEL_ERROR", "TIMED_OUT", "CLOSED"].includes(status)) realtimeStatus = "offline";
+          renderChat();
+        });
+    } catch (error) {
+      realtimeStatus = "offline";
+      console.error("Realtime chat connection failed", error);
+      renderChat();
+    }
+  }
+
   function renderChat() {
     const channels = [["world", "globe-2", "全服"], ["guild", "shield", "行会"], ["peace", "handshake", "和平"]];
     const channel = state.chat.channel || "world";
@@ -199,8 +277,9 @@
       <p class="${message.language === "gold" ? "taurus-text" : ""}">${escapeHTML(message.content)}</p>
       ${message.translation ? `<small>普通语：${escapeHTML(message.translation)}</small>` : ""}
     </article>`).join("") : `<div class="chat-empty">${icon("radio")}<strong>${channelName}频道暂无消息</strong><span>你可以发送本频道的第一条消息。</span></div>`;
+    const connectionText = { local: "本地原型", connecting: "连接中", online: "实时在线", offline: "连接失败" }[realtimeStatus];
     chatRoot.innerHTML = `<button class="chat-scrim" data-action="close-chat" aria-label="关闭聊天"></button><aside class="chat-drawer" aria-label="全服聊天">
-      <header class="chat-head"><div><span class="eyebrow">金牛一服</span><h2>全服聊天</h2></div><div class="chat-head-actions"><span class="chat-connection">本地原型</span><button class="icon-button" data-action="close-chat" aria-label="关闭聊天">${icon("x")}</button></div></header>
+      <header class="chat-head"><div><span class="eyebrow">金牛一服</span><h2>全服聊天</h2></div><div class="chat-head-actions"><span class="chat-connection ${realtimeStatus}">${connectionText}</span><button class="icon-button" data-action="close-chat" aria-label="关闭聊天">${icon("x")}</button></div></header>
       <nav class="chat-tabs" aria-label="聊天频道">${channels.map(([id, iconName, label]) => `<button class="${channel === id ? "active" : ""}" data-action="chat-channel" data-channel="${id}">${icon(iconName)} ${label}</button>`).join("")}</nav>
       <div class="chat-messages" id="chat-messages">${messageHTML}</div>
       <div class="chat-composer">
@@ -227,13 +306,13 @@
     document.body.classList.remove("chat-open");
   }
 
-  function sendChatMessage() {
+  async function sendChatMessage() {
     const input = document.getElementById("chat-input");
     const source = (input?.value || ui.chatDraft).trim();
-    if (!source) return;
+    if (!source || chatSending) return;
     const isGold = state.chat.language === "gold";
     const now = new Date();
-    state.chat.messages.push({
+    const message = {
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
       channel: state.chat.channel,
       author: state.player.name,
@@ -242,7 +321,34 @@
       content: isGold ? toTaurusLanguage(source) : source,
       translation: isGold && !/^[a-zA-Z\s,.'?!-]+$/.test(source) ? source : "",
       language: isGold ? "gold" : "common"
-    });
+    };
+    if (realtimeConfigured) {
+      if (realtimeStatus !== "online" || !realtimeUserId) return toast("全服聊天尚未连接，请稍后再试", "wifi-off");
+      chatSending = true;
+      try {
+        const result = await realtimeClient.from("world_messages").insert({
+          user_id: realtimeUserId,
+          channel: message.channel,
+          author: message.author,
+          village: message.village,
+          content: message.content,
+          translation: message.translation,
+          language: message.language
+        }).select().single();
+        if (result.error) {
+          const limited = /rate|wait/i.test(result.error.message || "");
+          return toast(limited ? "发送过快，请稍后再试" : "消息未发送，请检查连接", "circle-alert");
+        }
+        appendRealtimeMessage(result.data);
+      } catch (error) {
+        console.error("Realtime message send failed", error);
+        return toast("消息未发送，请检查连接", "circle-alert");
+      } finally {
+        chatSending = false;
+      }
+    } else {
+      state.chat.messages.push(message);
+    }
     state.chat.messages = state.chat.messages.slice(-60);
     ui.chatDraft = "";
     saveState();
@@ -1108,5 +1214,6 @@
 
   if (!location.hash) history.replaceState(null, "", "#home");
   render();
+  connectRealtimeChat();
   if (!state.initialized) setTimeout(showOnboarding, 80);
 })();
