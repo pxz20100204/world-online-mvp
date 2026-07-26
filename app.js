@@ -80,6 +80,7 @@
   let realtimeSubscription = null;
   let realtimeStatus = "local";
   let chatSending = false;
+  let arenaEnginePromise = null;
 
   const supabaseConfig = window.SUPABASE_CONFIG || {};
   const realtimeConfigured = Boolean(
@@ -128,6 +129,34 @@
 
   function refreshIcons() {
     if (window.lucide) window.lucide.createIcons({ attrs: { "aria-hidden": "true" } });
+  }
+
+  function loadScriptOnce(source, id) {
+    const existing = document.getElementById(id);
+    if (existing) return new Promise((resolve, reject) => {
+      if (existing.dataset.loaded === "true") return resolve();
+      existing.addEventListener("load", resolve, { once: true });
+      existing.addEventListener("error", reject, { once: true });
+    });
+    return new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.id = id;
+      script.src = source;
+      script.async = true;
+      script.addEventListener("load", () => { script.dataset.loaded = "true"; resolve(); }, { once: true });
+      script.addEventListener("error", () => { script.remove(); reject(new Error(`Failed to load ${source}`)); }, { once: true });
+      document.head.appendChild(script);
+    });
+  }
+
+  function ensureArenaEngine() {
+    if (window.Phaser && window.WorldArena) return Promise.resolve();
+    if (!arenaEnginePromise) {
+      arenaEnginePromise = loadScriptOnce("vendor/phaser.min.js", "phaser-runtime")
+        .then(() => loadScriptOnce("arena.js", "arena-runtime"))
+        .catch((error) => { arenaEnginePromise = null; throw error; });
+    }
+    return arenaEnginePromise;
   }
 
   function formatNumber(value) {
@@ -1182,11 +1211,23 @@
     refreshIcons();
   }
 
-  function startArenaMatch() {
+  async function startArenaMatch() {
     const playerHero = getHero(ui.arenaPlayerHero);
     const kingHero = getHero(ui.arenaKingHero);
     if (!playerHero || !kingHero || !state.roster[playerHero.id]) return toast("请选择已拥有的出战人物", "circle-alert");
-    if (!window.WorldArena || !window.Phaser) return toast("野局引擎未完成加载", "circle-alert");
+    const startButton = document.querySelector('[data-action="start-king-arena"]');
+    if (startButton) {
+      startButton.disabled = true;
+      startButton.innerHTML = `${icon("loader-circle")} 加载竞技引擎`;
+      refreshIcons();
+    }
+    try {
+      await ensureArenaEngine();
+    } catch (error) {
+      console.error("Arena engine failed to load", error);
+      toast("野局引擎加载失败，请稍后重试", "circle-alert");
+      return renderArena();
+    }
     ui.arenaActive = true;
     renderArenaMatchShell(playerHero, kingHero);
     requestAnimationFrame(() => {

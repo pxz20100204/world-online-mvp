@@ -324,6 +324,7 @@ body.chat-open .toast-root { right: 410px; }
 .arena-record span:last-child { border-right: 0; }
 .arena-record strong { display: block; margin-top: 2px; color: var(--ink); font-size: 11px; }
 .arena-start { min-width: 220px; }
+.arena-start:disabled .lucide { animation: slow-turn 1s linear infinite; }
 .arena-rules-band { margin-top: 14px; display: grid; grid-template-columns: repeat(4,1fr); border: 1px solid var(--line); background: var(--surface); }
 .arena-rules-band div { min-height: 76px; padding: 12px; border-right: 1px solid var(--line); }
 .arena-rules-band div:last-child { border-right: 0; }
