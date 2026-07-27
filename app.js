@@ -1285,8 +1285,9 @@
       const cooldown = snapshot.player.cooldowns[key];
       button.disabled = snapshot.player.dead || cooldown > .05;
       button.classList.toggle("cooling", cooldown > .05);
+      button.classList.toggle("queued", snapshot.player.queuedAction === key);
       const label = button.querySelector(".cooldown");
-      if (label) label.textContent = cooldown > .05 ? `${cooldown.toFixed(1)}s` : "就绪";
+      if (label) label.textContent = cooldown > .05 ? `${cooldown.toFixed(1)}s` : snapshot.player.queuedAction === key ? "锁定中" : "就绪";
     }
     document.querySelectorAll('[data-action="arena-command"][data-command="advance"],[data-action="arena-command"][data-command="retreat"]').forEach((button) => { button.disabled = snapshot.player.dead; });
   }

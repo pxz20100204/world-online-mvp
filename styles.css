@@ -366,6 +366,8 @@ body.chat-open .toast-root { right: 410px; }
 .arena-controls button:disabled { opacity: .44; cursor: not-allowed; }
 .arena-controls button.ultimate { color: #ffe7b9; border-color: #9e7542; background: #57442d; }
 .arena-controls button.cooling::after { content: ""; position: absolute; inset: 0; background: rgba(10,15,14,.34); }
+.arena-controls button.queued { border-color: #f0c672; background: #4b5140; box-shadow: inset 0 0 0 2px rgba(240,198,114,.22); }
+.arena-controls button.queued small { color: #ffd889; font-weight: 800; }
 .arena-controls .lucide { width: 19px; }
 .arena-controls strong { max-width: 100%; overflow: hidden; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .arena-controls small { min-height: 11px; color: #acbab6; font-size: 7px; font-variant-numeric: tabular-nums; }

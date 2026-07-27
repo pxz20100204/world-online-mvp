@@ -77,6 +77,7 @@
         moving: false,
         moveDirection: 0,
         moveUntil: 0,
+        queuedAction: null,
         stunUntil: 0,
         cooldowns: { basic: 0, skill1: 0, skill2: 0, ultimate: 0 },
         basicRange: 7.5,
@@ -206,6 +207,7 @@
     stepHero(entity, dt) {
       Object.keys(entity.cooldowns).forEach((key) => { entity.cooldowns[key] = Math.max(0, entity.cooldowns[key] - dt); });
       if (entity.dead) {
+        entity.queuedAction = null;
         entity.respawn -= dt;
         if (entity.respawn <= 0) {
           entity.dead = false;
@@ -222,6 +224,28 @@
         const speed = (4.4 + entity.level * .08) * entity.moveDirection;
         entity.pos = clamp(entity.pos + speed * dt, 5, 95);
       }
+      this.stepQueuedAction(entity);
+    }
+
+    stepQueuedAction(entity) {
+      const action = entity.queuedAction;
+      if (!action || entity.dead || entity.stunUntil > this.match.elapsed || entity.cooldowns[action] > 0) return;
+      const ranges = { basic: entity.basicRange, skill1: entity.skill1Range, ultimate: entity.ultimateRange };
+      const target = this.heroTarget(entity, ranges[action]);
+      if (target) {
+        entity.queuedAction = null;
+        entity.moveUntil = 0;
+        entity.moving = false;
+        this.applyAction(entity.side, action);
+        return;
+      }
+      const nearest = this.nearestEnemyTarget(entity);
+      if (!nearest) {
+        entity.queuedAction = null;
+        return;
+      }
+      entity.moveDirection = Math.sign(nearest.pos - entity.pos) || (entity.side === "player" ? 1 : -1);
+      entity.moveUntil = this.match.elapsed + .25;
     }
 
     spawnWave() {
@@ -351,17 +375,20 @@
       }
       const forward = side === "player" ? 1 : -1;
       if (action === "advance" || action === "retreat") {
+        entity.queuedAction = null;
         entity.moveDirection = action === "advance" ? forward : -forward;
         entity.moveUntil = this.match.elapsed + .85;
         return true;
       }
       if (action === "hold") {
+        entity.queuedAction = null;
         entity.moveUntil = 0;
         entity.moving = false;
         return true;
       }
       if (entity.cooldowns[action] > 0) return false;
       if (action === "skill2") {
+        entity.queuedAction = null;
         entity.shield = Math.floor(entity.maxHp * .2 + entity.hero.baseDef * .8);
         entity.shieldUntil = this.match.elapsed + 4;
         entity.hp = Math.min(entity.maxHp, entity.hp + Math.floor(entity.maxHp * .05));
@@ -372,7 +399,26 @@
       }
       const ranges = { basic: entity.basicRange, skill1: entity.skill1Range, ultimate: entity.ultimateRange };
       const target = this.heroTarget(entity, ranges[action]);
-      if (!target) return false;
+      if (!target) {
+        if (side !== "player") return false;
+        if (entity.queuedAction === action) {
+          entity.queuedAction = null;
+          entity.moveUntil = 0;
+          entity.moving = false;
+          this.emitLog(`${entity.hero.name}取消了自动追击。`);
+          return true;
+        }
+        entity.queuedAction = action;
+        const nearest = this.nearestEnemyTarget(entity);
+        if (nearest) {
+          entity.moveDirection = Math.sign(nearest.pos - entity.pos) || 1;
+          entity.moveUntil = this.match.elapsed + .25;
+        }
+        const skillName = action === "basic" ? "普通攻击" : action === "skill1" ? entity.hero.skills[0] : entity.hero.skills[2];
+        this.flashAt(entity.pos, 0xe3bd7b, .8);
+        this.emitLog(`${skillName}已锁定最近目标，进入射程后自动施放。`);
+        return true;
+      }
       const factors = { basic: .82, skill1: 1.45, ultimate: 2.55 };
       const cooldowns = { basic: .82, skill1: 5, ultimate: 18 };
       const levelScale = 1 + (entity.level - 1) * .085;
@@ -383,6 +429,20 @@
       const skillName = action === "basic" ? "普通攻击" : action === "skill1" ? entity.hero.skills[0] : entity.hero.skills[2];
       this.emitLog(`${entity.hero.name}施放${skillName}，造成 ${damage} 伤害。`);
       return true;
+    }
+
+    nearestEnemyTarget(entity) {
+      const enemySide = opposingSide(entity.side);
+      const candidates = this.match.minions.filter((unit) => unit.alive && unit.side === enemySide);
+      const enemyHero = this.match[enemySide];
+      if (!enemyHero.dead) candidates.push(enemyHero);
+      const tower = this.match.structures[`${enemySide}Tower`];
+      if (tower.hp > 0) candidates.push(tower);
+      else {
+        const core = this.match.structures[`${enemySide}Core`];
+        if (core.hp > 0) candidates.push(core);
+      }
+      return candidates.sort((left, right) => Math.abs(left.pos - entity.pos) - Math.abs(right.pos - entity.pos))[0] || null;
     }
 
     heroTarget(entity, range) {
@@ -522,6 +582,7 @@
         name: entity.hero.name,
         hp: Math.floor(entity.hp), maxHp: Math.floor(entity.maxHp), level: entity.level, xp: entity.xp,
         gold: entity.gold, kills: entity.kills, deaths: entity.deaths, dead: entity.dead, respawn: Math.max(0, entity.respawn),
+        queuedAction: entity.queuedAction,
         cooldowns: Object.fromEntries(Object.entries(entity.cooldowns).map(([key, value]) => [key, Math.max(0, value)]))
       });
       return {
@@ -591,6 +652,6 @@
     stop,
     isRunning: () => Boolean(game && activeScene && activeScene.match && !activeScene.match.finished),
     snapshot: () => activeScene?.hudSnapshot() || null,
-    version: "1.0.0-phaser-3.90"
+    version: "1.1.0-phaser-3.90"
   };
 })();
