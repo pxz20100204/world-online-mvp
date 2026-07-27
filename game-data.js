@@ -154,10 +154,11 @@
         ["基本语序", "陈述句采用主语—宾语—动词顺序。ka 标记主题，ru 标记宾语，no 标记地点；疑问句末尾加 sa，否定词 mu 放在动词前。例：mi ka sava ru naru，直译为“我—主题—帮助—宾语—需要”。"],
         ["时态与复数", "动词不因人称变化。ta- 表示过去，li- 表示将来，无前缀表示现在；名词后加 -en 表示复数。例：mi-en ka tora no li-luma，意思是“我们将进入主城”。"],
         ["跨语言转换", "常用外语句按词义转换为核心词根；未收录的人名、地名和其他文字会生成稳定的金牛语词根。同一原词每次得到相同结果，并保留原文供所有玩家对照。"],
-        ["核心词根", "mi 我；ti 你；sen 众人；tora 主城；vila 村落；vara 人物；aur 黄金；mara 商人；zhal 战斗；karo 召唤；luma 进入；tari 等待；dai 胜利；sava 帮助；suru 生存币。"],
+        ["主题曲", "《Sela no Tora》意为“暮光中的主城”。歌曲讲述一位主公在战斗平息后的夜色里等待故人，金色余晖在梦中消散，却仍相信众人会在暮光中重逢。"],
+        ["核心词根", "mi 我；ti 你；sen 众人；tora 主城；vila 村落；vara 人物；aur 黄金；mara 商人；zhal 战斗；karo 召唤；luma 进入；tari 等待；dai 胜利；sava 帮助；suru 生存币；sela 暮光；nam 名字；mora 梦境；vora 消散；sora 回响。"],
         ["数词", "un 一；du 二；tri 三；kar 四；pen 五；hex 六；sev 七；ok 八；nav 九；dek 十。数词位于名词前，不改变名词词形。"]
       ],
-      facts: [["你好", "sena"], ["谢谢", "soro"], ["我需要帮助", "mi ka sava ru naru"], ["黄金商人在主城", "aur-mara ka tora no su"]]
+      facts: [["你好", "sena"], ["谢谢", "soro"], ["我需要帮助", "mi ka sava ru naru"], ["暮光中的主城", "Sela no Tora"], ["黄金商人在主城", "aur-mara ka tora no su"]]
     },
     rules: {
       title: "法律与裁决",

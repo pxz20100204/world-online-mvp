@@ -81,6 +81,22 @@
   let realtimeStatus = "local";
   let chatSending = false;
   let arenaEnginePromise = null;
+  let songAudio = null;
+  let songFadeTimer = null;
+  let songDesiredPlayback = false;
+
+  const TAURUS_SONG = {
+    title: "Sela no Tora",
+    subtitle: "暮光中的主城",
+    lyrics: [
+      ["Mi ka nava no ti ru tari.", "我在夜色里等你。"],
+      ["Tora no sela ka yava.", "主城的暮光渐渐远去。"],
+      ["Sena mu su, dai mu su.", "不再有问候，也不再有胜利。"],
+      ["Ti-nam ka mi no sora.", "你的名字仍在我心中回响。"],
+      ["Aur-sela ka mora no vora.", "金色余晖在梦里消散。"],
+      ["Mi-en ka sela no li-dai.", "我们终会在暮光中重逢。"]
+    ]
+  };
 
   const supabaseConfig = window.SUPABASE_CONFIG || {};
   const realtimeConfigured = Boolean(
@@ -158,6 +174,84 @@
     }
     return arenaEnginePromise;
   }
+
+  function ensureGameSong() {
+    if (songAudio || typeof Audio === "undefined") return songAudio;
+    songAudio = new Audio("assets/sela-no-tora.wav");
+    songAudio.loop = true;
+    songAudio.preload = "auto";
+    songAudio.volume = 0;
+    songAudio.addEventListener("error", () => console.error("Taurus song failed to load", songAudio?.error), { once: true });
+    return songAudio;
+  }
+
+  function fadeGameSong(targetVolume, duration = 650, onComplete) {
+    const audio = ensureGameSong();
+    if (!audio) return;
+    if (songFadeTimer) clearInterval(songFadeTimer);
+    const initial = audio.volume;
+    const startedAt = performance.now();
+    songFadeTimer = setInterval(() => {
+      const progress = Math.min(1, (performance.now() - startedAt) / duration);
+      audio.volume = initial + (targetVolume - initial) * progress;
+      if (progress >= 1) {
+        clearInterval(songFadeTimer);
+        songFadeTimer = null;
+        onComplete?.();
+      }
+    }, 40);
+  }
+
+  function startGameSong() {
+    if (!state.settings.sound) return;
+    songDesiredPlayback = true;
+    const audio = ensureGameSong();
+    if (!audio) return;
+    if (!audio.paused) {
+      if (audio.volume < .17) fadeGameSong(.18);
+      return;
+    }
+    const playback = audio.play();
+    if (playback?.then) {
+      playback.then(() => {
+        if (songDesiredPlayback && state.settings.sound) fadeGameSong(.18);
+        else { audio.volume = 0; audio.pause(); }
+      }).catch(() => {
+        // Browsers may reject playback until the next direct user interaction.
+      });
+    } else {
+      fadeGameSong(.18);
+    }
+  }
+
+  function stopGameSong() {
+    songDesiredPlayback = false;
+    if (!songAudio) return;
+    if (songAudio.paused) { songAudio.volume = 0; return; }
+    fadeGameSong(0, 300, () => songAudio?.pause());
+  }
+
+  function syncGameSong() {
+    if (state.settings.sound) startGameSong();
+    else stopGameSong();
+  }
+
+  window.WorldGameAudio = {
+    start: startGameSong,
+    stop: stopGameSong,
+    metadata: () => Object.assign({}, TAURUS_SONG),
+    debug: () => ({
+      enabled: Boolean(state.settings.sound),
+      created: Boolean(songAudio),
+      paused: songAudio?.paused ?? true,
+      currentTime: songAudio?.currentTime || 0,
+      duration: Number.isFinite(songAudio?.duration) ? songAudio.duration : 0,
+      volume: songAudio?.volume || 0,
+      readyState: songAudio?.readyState || 0,
+      networkState: songAudio?.networkState || 0,
+      errorCode: songAudio?.error?.code || 0
+    })
+  };
 
   function formatNumber(value) {
     if (value >= 100000000) return `${(value / 100000000).toFixed(value >= 1000000000 ? 0 : 1)}亿`;
@@ -1551,7 +1645,13 @@
 
   function showSettings() {
     const toggle = (label, note, key) => `<div style="min-height:52px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line)"><div><strong style="font-size:10px">${label}</strong><small style="display:block;margin-top:3px;color:var(--ink-faint);font-size:9px">${note}</small></div><button class="button small ${state.settings[key] ? "primary" : ""}" data-action="toggle-setting" data-setting="${key}">${state.settings[key] ? "已开启" : "已关闭"}</button></div>`;
-    showModal(modalShell("设置", `${toggle("界面动态", "地图节点与战斗反馈动画", "motion")}${toggle("游戏音效", "当前原型未加载音频素材", "sound")}<div style="padding-top:15px"><button class="button danger" data-action="confirm-reset">${icon("trash-2")} 重置本地存档</button></div>`, `<button class="button" data-action="close-modal">完成</button>`));
+    const track = `<div class="settings-track"><span>${icon("music-2")}</span><div><strong>${TAURUS_SONG.title}</strong><small>${TAURUS_SONG.subtitle} · 金牛语忧伤曲</small></div><button class="button small" data-action="show-song-lyrics">${icon("book-open-text")} 歌词</button></div>`;
+    showModal(modalShell("设置", `${toggle("界面动态", "地图节点与战斗反馈动画", "motion")}${toggle("游戏音乐", `原创金牛语歌曲《${TAURUS_SONG.title}》循环播放`, "sound")}${track}<div style="padding-top:15px"><button class="button danger" data-action="confirm-reset">${icon("trash-2")} 重置本地存档</button></div>`, `<button class="button" data-action="close-modal">完成</button>`));
+  }
+
+  function showSongLyrics() {
+    const body = `<div class="song-title"><span>${icon("music-2")}</span><div><strong>${TAURUS_SONG.title}</strong><small>${TAURUS_SONG.subtitle}</small></div></div><div class="song-lyrics">${TAURUS_SONG.lyrics.map(([gold, common]) => `<p><strong>${gold}</strong><span>${common}</span></p>`).join("")}</div>`;
+    showModal(modalShell("金牛语主题曲", body, `<button class="button" data-action="settings-back">返回设置</button>`));
   }
 
   const PUBLIC_GAME_URL = "https://pxz20100204.github.io/world-online-mvp/";
@@ -1830,6 +1930,7 @@
   }
 
   function handleClick(event) {
+    if (state.settings.sound) startGameSong();
     const route = event.target.closest("[data-route]");
     if (route) {
       if (route.tagName === "A") return;
@@ -1986,10 +2087,11 @@
       const currency = actionButton.dataset.currency; const cost = Number(actionButton.dataset.cost); const item = actionButton.dataset.item;
       if (state[currency] < cost) return; state[currency] -= cost; state.inventory[item] += 1; saveState(); showMerchant(); toast("交易完成，物品已收入仓库", "package-check");
     }
-    if (action === "toggle-setting") { const key = actionButton.dataset.setting; state.settings[key] = !state.settings[key]; document.documentElement.style.setProperty("--motion-state", state.settings.motion ? "running" : "paused"); saveState(); showSettings(); }
+    if (action === "show-song-lyrics") showSongLyrics();
+    if (action === "toggle-setting") { const key = actionButton.dataset.setting; state.settings[key] = !state.settings[key]; document.documentElement.style.setProperty("--motion-state", state.settings.motion ? "running" : "paused"); saveState(); if (key === "sound") syncGameSong(); showSettings(); }
     if (action === "confirm-reset") showModal(modalShell("重置存档？", `<p style="font-size:11px;line-height:1.8;color:var(--ink-soft)">这会删除当前主公、人物、关卡和资源进度。操作只影响本浏览器，无法撤销。</p>`, `<button class="button" data-action="settings-back">取消</button><button class="button danger" data-action="reset-save">确认重置</button>`));
     if (action === "settings-back") showSettings();
-    if (action === "reset-save") { localStorage.removeItem(STORAGE_KEY); state = defaultState(); Object.assign(ui, { onboardingStep: 1, onboardingName: "", onboardingAnswers: {}, giftResults: [] }); closeModal(); render(); showOnboarding(); }
+    if (action === "reset-save") { localStorage.removeItem(STORAGE_KEY); state = defaultState(); Object.assign(ui, { onboardingStep: 1, onboardingName: "", onboardingAnswers: {}, giftResults: [] }); syncGameSong(); closeModal(); render(); showOnboarding(); }
   }
 
   function handleChange(event) {
@@ -2011,6 +2113,7 @@
   }
 
   function handleKeydown(event) {
+    if (state.settings.sound) startGameSong();
     if (event.target.id === "chat-input" && event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       sendChatMessage();
