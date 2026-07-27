@@ -57,6 +57,14 @@
       research: { progress: 0, goal: 1, claimed: false }
     },
     idleClaimAt: Date.now() - 3 * 60 * 60 * 1000,
+    settlement: {
+      plan: "balanced",
+      food: 360000,
+      lastClaimAt: Date.now() - 3 * 60 * 60 * 1000,
+      totalGold: 0,
+      totalRecruits: 0,
+      totalGrowth: 0
+    },
     chat: {
       channel: "world",
       language: "common",
@@ -126,6 +134,7 @@
           history: Array.isArray(saved.rebel?.history) ? saved.rebel.history.slice(-8) : []
         }),
         arena: Object.assign(defaultState().arena, saved.arena || {}),
+        settlement: Object.assign(defaultState().settlement, saved.settlement || {}),
         settings: Object.assign(defaultState().settings, saved.settings || {})
       });
     } catch (error) {
@@ -735,16 +744,115 @@
     }).join("") + Array.from({ length: Math.max(0, 3 - state.team.length) }, () => `<button class="team-mini" data-action="go-heroes">${icon("plus")}<strong>空位</strong></button>`).join("");
   }
 
-  function canPromote() {
+  const HOUR_MS = 60 * 60 * 1000;
+  const SETTLEMENT_PLANS = {
+    balanced: { label: "均衡发展", short: "均衡", agriculture: 45, commerce: 35, recruitment: 20 },
+    food: { label: "粮食优先", short: "粮食", agriculture: 65, commerce: 20, recruitment: 15 },
+    commerce: { label: "商贸优先", short: "商贸", agriculture: 30, commerce: 55, recruitment: 15 },
+    recruitment: { label: "征募优先", short: "征募", agriculture: 35, commerce: 20, recruitment: 45 }
+  };
+
+  function settlementPlan() {
+    return SETTLEMENT_PLANS[state.settlement.plan] || SETTLEMENT_PLANS.balanced;
+  }
+
+  function foodCapacity(population = state.population) {
+    return Math.floor(population * 4 + state.village * 50000);
+  }
+
+  function settlementHourly(population = state.population, troops = state.troops) {
+    const plan = settlementPlan();
+    const workers = Math.max(0, Math.floor(population - troops));
+    const efficiency = 1 + Math.min(1.25, state.researchCount * .08 + state.village * .035);
+    const foodGross = Math.floor(workers * plan.agriculture / 100 * .22 * efficiency);
+    const foodConsumption = Math.ceil(population * .055 + troops * .012);
+    const foodNet = foodGross - foodConsumption;
+    const gold = Math.floor(workers * plan.commerce / 100 * .006 * efficiency);
+    const troopLimit = Math.floor(population * .35);
+    const recruits = Math.max(0, Math.min(Math.floor(workers * plan.recruitment / 100 * .0025 * efficiency), troopLimit - troops));
+    const growth = foodNet > 0 ? Math.max(0, Math.floor(Math.min(population * .001, foodNet * .015))) : 0;
+    return { plan, workers, efficiency, foodGross, foodConsumption, foodNet, gold, recruits, growth, troopLimit };
+  }
+
+  function simulateSettlement(hours) {
+    let population = Math.max(1, Math.floor(state.population));
+    let troops = Math.max(0, Math.min(population, Math.floor(state.troops)));
+    let food = Math.max(0, Math.floor(state.settlement.food));
+    const totals = { gold: 0, food: 0, recruits: 0, growth: 0, losses: 0 };
+    for (let hour = 0; hour < hours; hour += 1) {
+      const beforeFood = food;
+      const rates = settlementHourly(population, troops);
+      const supply = food + rates.foodGross;
+      const shortage = Math.max(0, rates.foodConsumption - supply);
+      food = Math.max(0, Math.min(foodCapacity(population), supply - rates.foodConsumption));
+      let growth = 0;
+      let losses = 0;
+      if (shortage > 0) {
+        const civilians = Math.max(0, population - troops);
+        losses = Math.min(civilians, Math.max(1, Math.ceil(shortage * .35)));
+        population -= losses;
+      } else {
+        growth = rates.growth;
+        population += growth;
+      }
+      const recruits = shortage > 0 ? 0 : Math.max(0, Math.min(rates.recruits, Math.floor(population * .35) - troops, population - troops));
+      troops += recruits;
+      totals.gold += rates.gold;
+      totals.food += food - beforeFood;
+      totals.recruits += recruits;
+      totals.growth += growth;
+      totals.losses += losses;
+    }
+    return { population, troops, food, totals };
+  }
+
+  function settlementPending(now = Date.now()) {
+    const lastClaimAt = Number(state.settlement.lastClaimAt) || now;
+    const elapsed = Math.max(0, now - lastClaimAt);
+    const rawHours = Math.floor(elapsed / HOUR_MS);
+    const hours = Math.min(12, rawHours);
+    return {
+      hours,
+      rawHours,
+      minutesUntilNext: Math.max(1, Math.ceil((HOUR_MS - elapsed % HOUR_MS) / 60000)),
+      nextClaimAt: rawHours >= 12 ? now : lastClaimAt + hours * HOUR_MS,
+      projection: simulateSettlement(hours)
+    };
+  }
+
+  function promotionRequirements() {
+    return {
+      population: 140000 + Math.max(0, state.village - 1) * 6500,
+      troops: 2400 + state.village * 150
+    };
+  }
+
+  function storyPromotionReady() {
     if (state.village >= 9) return false;
-    if (state.village === 8) return state.finalCleared;
-    return state.stageProgress >= state.village;
+    return state.village === 8 ? state.finalCleared : state.stageProgress >= state.village;
+  }
+
+  function canPromote() {
+    if (!storyPromotionReady()) return false;
+    const requirement = promotionRequirements();
+    return state.population >= requirement.population && state.troops >= requirement.troops;
+  }
+
+  function promotionProgress() {
+    if (state.village >= 9) return 100;
+    const requirement = promotionRequirements();
+    const story = storyPromotionReady() ? 1 : 0;
+    return Math.max(0, Math.min(100, Math.min(state.population / requirement.population, state.troops / requirement.troops, story) * 100));
   }
 
   function nextPromotionText() {
     if (state.village >= 9) return "已进入通关村";
-    if (state.village === 8) return "击败人物之王后晋升";
-    return `通关第 ${state.village} 章后晋升`;
+    const requirement = promotionRequirements();
+    const missing = [];
+    if (!storyPromotionReady()) missing.push(state.village === 8 ? "击败人物之王" : `通关第 ${state.village} 章`);
+    if (state.population < requirement.population) missing.push(`人口 ${formatNumber(state.population)}/${formatNumber(requirement.population)}`);
+    if (state.troops < requirement.troops) missing.push(`兵力 ${formatNumber(state.troops)}/${formatNumber(requirement.troops)}`);
+    return missing.length ? missing.join(" · ") : "主线、人口与驻军均已达标";
   }
 
   const DAY_MS = 24 * 60 * 60 * 1000;
@@ -779,6 +887,8 @@
     const readyTasks = Object.values(state.tasks).filter((task) => task.progress >= task.goal && !task.claimed).length;
     const protection = protectionStatus();
     const liveRebelEvent = state.rebel.activeEvent && !state.rebel.activeEvent.simulation;
+    const production = settlementHourly();
+    const pendingProduction = settlementPending();
     let analysis = {
       priority: "主线推进",
       title: `挑战第 ${stage.id} 章 · ${stage.name}`,
@@ -794,6 +904,15 @@
         summary: `叛军正在针对${liveRebelEvent.targetLabel}设局。继续推进主线会暴露后方，建议先完成反制。`,
         action: "rebel",
         actionLabel: "处理叛军事件",
+        confidence: 99
+      };
+    } else if (production.foodNet < 0 && state.settlement.food < production.foodConsumption * 6) {
+      analysis = {
+        priority: "粮食安全",
+        title: "切换粮食优先，阻止人口流失",
+        summary: `当前每小时粮食缺口 ${formatNumber(Math.abs(production.foodNet))}，粮仓只够维持约 ${Math.max(0, Math.floor(state.settlement.food / production.foodConsumption))} 小时。`,
+        action: "settlement",
+        actionLabel: "调整劳力",
         confidence: 99
       };
     } else if (state.team.length < 3) {
@@ -831,6 +950,15 @@
         action: "home",
         actionLabel: "返回委托",
         confidence: 100
+      };
+    } else if (pendingProduction.hours >= 4) {
+      analysis = {
+        priority: "领地生产",
+        title: `结算 ${pendingProduction.hours} 小时人口产出`,
+        summary: `现有劳力可结算 ${formatNumber(pendingProduction.projection.totals.gold)} 金币、${formatNumber(pendingProduction.projection.totals.recruits)} 兵力和 ${formatNumber(pendingProduction.projection.totals.growth)} 新人口。`,
+        action: "settlement",
+        actionLabel: "查看生产",
+        confidence: 98
       };
     } else if (!state.tasks.research.progress && state.gold >= 800) {
       analysis = {
@@ -877,7 +1005,8 @@
     }
     if (/资源|金币|生存币|科技|resource|gold/.test(query)) {
       const researchAffordable = Math.floor(state.gold / 800);
-      return `你有 ${formatNumber(state.gold)} 金币、${formatNumber(state.survival)} 生存币和 ${Math.floor(state.energy)} 行动力。金币最多支持 ${researchAffordable} 次基础研发；生存币可进行 ${Math.floor(state.survival / 200)} 次单抽。当前建议先保留一轮人物升级费用，再动用其余资源。`;
+      const production = settlementHourly();
+      return `你有 ${formatNumber(state.gold)} 金币、${formatNumber(state.survival)} 生存币、${formatNumber(state.settlement.food)} 粮食和 ${formatNumber(production.workers)} 劳力。当前每小时预计 ${production.foodNet >= 0 ? "增加" : "消耗"} ${formatNumber(Math.abs(production.foodNet))} 粮食、获得 ${formatNumber(production.gold)} 金币并补充 ${formatNumber(production.recruits)} 兵力。金币最多支持 ${researchAffordable} 次基础研发。`;
     }
     if (/主线|下一步|怎么做|next|campaign/.test(query)) {
       return `${analysis.title}。${analysis.summary} 我的置信度为 ${analysis.confidence}%，依据是战力、行动力、即时任务和领地威胁的联合排序。`;
@@ -927,6 +1056,7 @@
     if (action === "summon") return setRoute("summon");
     if (action === "campaign") return setRoute("campaign");
     if (action === "assistant") return showAssistant();
+    if (action === "settlement") return showSettlement();
     setRoute("home");
     if (action === "research") toast("研究所已定位，确认后再投入金币", "microscope");
     if (action === "home") toast("已完成委托位于主城下方", "list-checks");
@@ -1110,6 +1240,9 @@
     const protection = protectionStatus();
     const rebel = rebelBrief();
     const advice = guideAnalysis();
+    const production = settlementHourly();
+    const pendingProduction = settlementPending();
+    const activePlan = settlementPlan();
     main.innerHTML = `<section class="page home-page">
       ${pageHead("领地总览", `${state.player.name}的主城`, `${currentVillage} · ${protection.active ? `新手保护第 ${protection.day} 日` : "开放领地"} · 当前天气：薄雾`, `<button class="button" data-action="share-game">${icon("share-2")}<span>分享游戏</span></button><button class="button" data-action="open-guide">${icon("brain-circuit")}<span>AI 导引</span></button><button class="button primary" data-action="go-campaign">${icon("swords")}<span>继续主线</span></button>`)}
       <div class="home-grid">
@@ -1123,11 +1256,16 @@
             <div class="map-alert rebel-alert"><span class="alert-icon">${icon(protection.active ? "shield-alert" : "siren")}</span><div><strong>${rebel.title}</strong><small>${rebel.detail}</small></div><button class="button small ${protection.active ? "" : "danger"}" data-action="open-rebel">${icon("scan-search")}<span>${rebel.state}</span></button></div>
           </section>
           <div class="stats-row">
-            <div class="stat-tile"><span class="stat-icon">${icon("users")}</span><div><small>领地人口</small><strong>${formatNumber(state.population)}</strong></div></div>
+            <button class="stat-tile stat-action" data-action="open-settlement"><span class="stat-icon">${icon("users")}</span><div><small>领地人口 · 管理</small><strong>${formatNumber(state.population)}</strong></div>${icon("chevron-right")}</button>
             <div class="stat-tile"><span class="stat-icon gold">${icon("shield")}</span><div><small>可用兵力</small><strong>${formatNumber(state.troops)}</strong></div></div>
             <div class="stat-tile"><span class="stat-icon blue">${icon("microscope")}</span><div><small>科技指数</small><strong>${state.tech < .001 ? state.tech.toFixed(8) : state.tech.toFixed(4)}</strong></div></div>
             <div class="stat-tile"><span class="stat-icon red">${icon("flag")}</span><div><small>村落声望</small><strong>${state.reputation}</strong></div></div>
           </div>
+          <section class="panel production-strip">
+            <div class="production-strip-title"><span class="stat-icon gold">${icon("wheat")}</span><div><span class="eyebrow">领地生产 · ${activePlan.short}</span><h2>${formatNumber(production.workers)} 劳力运行中</h2><p>粮仓 ${formatNumber(state.settlement.food)}/${formatNumber(foodCapacity())}</p></div></div>
+            <div class="production-strip-rates"><span>粮食<strong class="${production.foodNet < 0 ? "negative" : ""}">${production.foodNet >= 0 ? "+" : ""}${formatNumber(production.foodNet)}/时</strong></span><span>税收<strong>+${formatNumber(production.gold)}/时</strong></span><span>征募<strong>+${formatNumber(production.recruits)}/时</strong></span><span>人口<strong>+${formatNumber(production.growth)}/时</strong></span></div>
+            <div class="production-strip-actions"><button class="button" data-action="open-settlement">${icon("sliders-horizontal")} 配置</button><button class="button ${pendingProduction.hours ? "primary" : ""}" data-action="claim-settlement" ${pendingProduction.hours ? "" : "disabled"}>${icon("package-check")} ${pendingProduction.hours ? `结算 ${pendingProduction.hours} 小时` : `${pendingProduction.minutesUntilNext} 分钟`}</button></div>
+          </section>
           <section class="panel ai-brief">
             <div class="ai-brief-mark">${icon("brain-circuit")}</div>
             <div class="ai-brief-copy"><span class="eyebrow">小金牛仔 · IQ 300+ 策略模型</span><h2>${advice.title}</h2><p>${advice.summary}</p></div>
@@ -1151,7 +1289,7 @@
           <section class="panel">
             <div class="panel-head"><div><h2>村落晋升</h2><p>${currentVillage} → ${nextVillage}</p></div>${icon("chevrons-up")}</div>
             <div class="panel-body">
-              <div class="progress" style="--value:${state.village / 9 * 100}%"><span></span></div>
+              <div class="progress" style="--value:${promotionProgress()}%"><span></span></div>
               <p style="margin:10px 0 13px;font-size:10px;color:var(--ink-faint)">${nextPromotionText()}</p>
               <button class="button wide ${promotion ? "gold" : ""}" data-action="promote" ${promotion ? "" : "disabled"}>${icon("badge-up")} ${promotion ? `晋升${nextVillage}` : "条件未达成"}</button>
             </div>
@@ -1159,7 +1297,7 @@
           <section class="panel">
             <div class="panel-head"><div><h2>研究所</h2><p>原料储备：充足</p></div><span class="tag">Lv.${state.researchCount + 1}</span></div>
             <div class="panel-body">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div><strong style="font-size:11px">聚落基础技术</strong><small style="display:block;margin-top:3px;color:var(--ink-faint);font-size:9px">提升人口与兵力生产</small></div>${icon("flask-conical")}</div>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div><strong style="font-size:11px">聚落基础技术</strong><small style="display:block;margin-top:3px;color:var(--ink-faint);font-size:9px">每级生产效率 +8%</small></div>${icon("flask-conical")}</div>
               <button class="button wide" data-action="research" ${state.gold < 800 ? "disabled" : ""}>${icon("hammer")} 研发 · 800 金币</button>
             </div>
           </section>
@@ -1638,6 +1776,47 @@
     showModal(modalShell("挂机小助手", body, `<button class="button ${ready ? "primary" : ""}" data-action="claim-idle" ${ready ? "" : "disabled"}>${ready ? "领取收益" : "尚未结算"}</button>`));
   }
 
+  function claimSettlementProduction(silent = false) {
+    const pending = settlementPending();
+    if (!pending.hours) {
+      if (!silent) toast(`还需 ${pending.minutesUntilNext} 分钟完成下一轮生产`, "clock-3");
+      return null;
+    }
+    const result = pending.projection;
+    state.population = result.population;
+    state.troops = result.troops;
+    state.settlement.food = result.food;
+    state.settlement.lastClaimAt = pending.nextClaimAt;
+    state.settlement.totalGold += result.totals.gold;
+    state.settlement.totalRecruits += result.totals.recruits;
+    state.settlement.totalGrowth += result.totals.growth;
+    state.gold += result.totals.gold;
+    saveState();
+    if (!silent) {
+      const populationText = result.totals.losses ? `人口 -${formatNumber(result.totals.losses)}` : `人口 +${formatNumber(result.totals.growth)}`;
+      toast(`生产结算：金币 +${formatNumber(result.totals.gold)}，兵力 +${formatNumber(result.totals.recruits)}，${populationText}`, result.totals.losses ? "triangle-alert" : "factory");
+    }
+    return result;
+  }
+
+  function showSettlement() {
+    const rates = settlementHourly();
+    const pending = settlementPending();
+    const plan = settlementPlan();
+    const capacity = foodCapacity();
+    const foodPercent = Math.max(0, Math.min(100, state.settlement.food / capacity * 100));
+    const planButtons = Object.entries(SETTLEMENT_PLANS).map(([id, option]) => `<button class="labor-plan ${state.settlement.plan === id ? "active" : ""}" data-action="select-settlement-plan" data-plan="${id}"><strong>${option.label}</strong><span><b>${option.agriculture}%</b> 农业 · <b>${option.commerce}%</b> 商贸 · <b>${option.recruitment}%</b> 征募</span></button>`).join("");
+    const body = `<div class="settlement-console">
+      <section class="settlement-summary"><div><span class="eyebrow">当前方案</span><h3>${plan.label}</h3><p>总人口 ${formatNumber(state.population)} · 驻军 ${formatNumber(state.troops)} · 可用劳力 ${formatNumber(rates.workers)}</p></div><span class="settlement-efficiency">${Math.round(rates.efficiency * 100)}%<small>生产效率</small></span></section>
+      <section class="granary"><div class="granary-head"><span>${icon("wheat")} 粮仓</span><strong>${formatNumber(state.settlement.food)} / ${formatNumber(capacity)}</strong></div><div class="progress ${rates.foodNet < 0 ? "danger" : ""}" style="--value:${foodPercent}%"><span></span></div><small>每小时生产 ${formatNumber(rates.foodGross)} · 消耗 ${formatNumber(rates.foodConsumption)} · <b class="${rates.foodNet < 0 ? "negative" : ""}">${rates.foodNet >= 0 ? "+" : ""}${formatNumber(rates.foodNet)}</b></small></section>
+      <div class="production-rates"><span>${icon("coins")} 税收<strong>+${formatNumber(rates.gold)}/时</strong></span><span>${icon("shield-plus")} 征募<strong>+${formatNumber(rates.recruits)}/时</strong></span><span>${icon("users-round")} 人口<strong>${rates.growth ? `+${formatNumber(rates.growth)}` : "0"}/时</strong></span><span>${icon("warehouse")} 粮食<strong class="${rates.foodNet < 0 ? "negative" : ""}">${rates.foodNet >= 0 ? "+" : ""}${formatNumber(rates.foodNet)}/时</strong></span></div>
+      <div class="labor-plans">${planButtons}</div>
+      <section class="production-pending"><div><span class="eyebrow">待结算</span><strong>${pending.hours ? `${pending.hours} 小时生产` : `${pending.minutesUntilNext} 分钟后完成`}</strong></div><div><span>${icon("coins")} ${formatNumber(pending.projection.totals.gold)}</span><span>${icon("shield-plus")} ${formatNumber(pending.projection.totals.recruits)}</span><span>${icon("users-round")} ${pending.projection.totals.losses ? `-${formatNumber(pending.projection.totals.losses)}` : `+${formatNumber(pending.projection.totals.growth)}`}</span></div></section>
+    </div>`;
+    const foot = `<button class="button" data-action="close-modal">关闭</button><button class="button primary" data-action="claim-settlement" ${pending.hours ? "" : "disabled"}>${icon("package-check")} 结算 ${pending.hours || 0} 小时</button>`;
+    showModal(modalShell("人口与劳力", body, foot), "large settlement-modal");
+  }
+
   function showMerchant() {
     const body = `<div style="display:flex;gap:13px;align-items:center;margin-bottom:16px"><span class="stat-icon gold" style="width:54px;height:54px">${icon("store")}</span><div><strong>黄金商人已被主城护卫拦下</strong><p style="margin:4px 0 0;color:var(--ink-faint);font-size:9px">普通语言翻译剩余 13 分钟。不要攻击商人。</p></div></div><div class="skill-list"><div class="skill-row" style="display:flex;align-items:center;gap:10px"><span class="stat-icon">${icon("heart")}</span><div style="flex:1"><strong>忠心丸</strong><span>一位人物忠诚永久提升至 100</span></div><button class="button small" data-action="buy-item" data-item="loyaltyPill" data-currency="gold" data-cost="8000" ${state.gold < 8000 ? "disabled" : ""}>8000 金币</button></div><div class="skill-row" style="display:flex;align-items:center;gap:10px"><span class="stat-icon blue">${icon("orbit")}</span><div style="flex:1"><strong>高阶通灵球</strong><span>用于武器通灵，原型版作为收藏品</span></div><button class="button small" data-action="buy-item" data-item="spiritOrb" data-currency="survival" data-cost="1200" ${state.survival < 1200 ? "disabled" : ""}>1200 生存币</button></div></div>`;
     showModal(modalShell("黄金商人", body, `<button class="button" data-action="close-modal">结束交易</button>`));
@@ -2008,10 +2187,24 @@
     if (action === "merchant") showMerchant();
     if (action === "archive-faction") { ui.archiveTab = "factions"; setRoute("archives"); }
     if (action === "dismiss-alert") { actionButton.closest(".map-alert")?.remove(); toast("雷区位置已标记在北境外环", "map-pin"); }
+    if (action === "open-settlement") showSettlement();
+    if (action === "claim-settlement") {
+      const result = claimSettlementProduction();
+      if (result) { render(); showSettlement(); }
+    }
+    if (action === "select-settlement-plan") {
+      const planId = actionButton.dataset.plan;
+      if (!SETTLEMENT_PLANS[planId] || state.settlement.plan === planId) return;
+      const previous = settlementPlan().label;
+      const settled = claimSettlementProduction(true);
+      state.settlement.plan = planId;
+      saveState(); render(); showSettlement();
+      toast(`${previous}已结束${settled ? "并结算" : ""}，现采用${settlementPlan().label}`, "sliders-horizontal");
+    }
     if (action === "promote") promoteVillage();
     if (action === "research") {
       if (state.gold < 800) return toast("金币不足", "circle-alert");
-      state.gold -= 800; state.researchCount += 1; state.tech = Math.min(.55, state.tech * 12 + .00000002); state.population += 260; state.troops += 85; state.tasks.research.progress = 1; saveState(); render(); toast("研究完成：人口与兵力生产提高", "flask-conical");
+      state.gold -= 800; state.researchCount += 1; state.tech = Math.min(.55, state.tech * 12 + .00000002); state.population += 260; state.troops += 85; state.tasks.research.progress = 1; saveState(); render(); toast("研究完成：领地生产效率 +8%", "flask-conical");
     }
     if (action === "claim-task") {
       const key = actionButton.dataset.task; const task = state.tasks[key];
