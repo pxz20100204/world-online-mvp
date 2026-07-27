@@ -82,8 +82,8 @@
     { id: 5, name: "霞踪旧道", subtitle: "阁门遗迹", type: "精英", recommended: 18500, energy: 9, enemy: "霞踪影卫", enemyShape: "sunset", enemyColor: "#9c6848", gold: 6800, survival: 450, exp: 1080, note: "旧道记录着夕阳总管与复活宝石的起源。" },
     { id: 6, name: "龙皇遗迹", subtitle: "皇庭回声", type: "首领", recommended: 23800, energy: 10, enemy: "龙皇幻影", enemyShape: "dragon", enemyColor: "#806d3b", gold: 8800, survival: 620, exp: 1360, note: "遗迹只认可足够稳固的队伍，建议携带守御人物。" },
     { id: 7, name: "亡灵之门", subtitle: "大帝守关", type: "首领", recommended: 30000, energy: 11, enemy: "亡灵大帝", enemyShape: "crown", enemyColor: "#4d516b", gold: 12000, survival: 800, exp: 1720, note: "亡灵不会疲劳。快速积攒气，在它完成仪式前结束战斗。" },
-    { id: 8, name: "总管的底线", subtitle: "主线第八章", type: "首领", recommended: 39000, energy: 12, enemy: "夕阳总管·魔化", enemyShape: "sunset", enemyColor: "#8f302c", gold: 18000, survival: 1200, exp: 2400, note: "面对特定问题时，总管的忠诚会失控。这里没有跳过对话的选项。" },
-    { id: 9, name: "服务器之星", subtitle: "最终挑战", type: "终局", recommended: 56000, energy: 15, enemy: "人物之王", enemyShape: "king", enemyColor: "#222c2a", gold: 50000, survival: 3000, exp: 5000, note: "全部人物细胞合成体的化身。通关村只承认击败它的主公。" }
+    { id: 8, name: "总管的底线", subtitle: "主线第八章", type: "首领", recommended: 39000, energy: 12, enemy: "夕阳总管·魔化", enemyShape: "sunset", enemyColor: "#8f302c", gold: 18000, survival: 1200, exp: 2400, note: "魔化余晖会攻击全队。建议用夕阳总管、大包子与深渊领主组成完整小队。" },
+    { id: 9, name: "服务器之星", subtitle: "最终挑战", type: "终局", recommended: 56000, energy: 15, enemy: "人物之王", enemyShape: "king", enemyColor: "#222c2a", gold: 50000, survival: 3000, exp: 5000, note: "人物之王会交替发动全体技能风暴与单体裁定，必须根据预告分配稳守。" }
   ];
 
   const villages = ["新手村", "弱鸡村", "普通村", "中手村", "藏龙卧虎村", "高手村", "钻石村", "大佬村", "神佬村", "通关村"];
@@ -102,13 +102,15 @@
     },
     characters: {
       title: "人物与忠诚",
-      lead: "人物拥有等级、星级、气、忠诚与进化路线。重复人物会自动升星；七星后再次获得会转化为碎片。",
+      lead: "人物拥有等级、星级、气、忠诚与进化路线。等级可以重置以培养新人物；重复人物会自动升星，七星后再次获得会转化为碎片。",
       sections: [
         ["技能体系", "每个人物拥有小招、中招、大招、必杀技与临死绝杀。原型版把小招、战技与必杀集中到回合操作中，气在战斗中积累。"],
+        ["培养重置", "人物可以重置回一级，并全额返还从一级升到当前等级花费的金币。重置不会改变星级、碎片、忠诚或编队位置，返还资源可立即投入其他人物。"],
+        ["小队副本", "副本最多三人出战。每名存活人物每轮行动一次，全部行动后首领才出手；首领会提前预告单体或全体技能，稳守只保护使用它的人物。"],
         ["夕阳总管", "他并非一开始就拒绝管理。高忠诚是常态，但霞踪阁、复活宝石与父子关系会让特定剧情更容易触发反叛。"],
         ["人物之王", "全人物细胞合成体的化身。它掌握英雄池内所有技能，是通关前必须面对的最终首领。"]
       ],
-      facts: [["最大星级", "七星"], ["编队人数", "原型版为三人"], ["忠心丸", "永久将忠诚提升至 100"], ["冥王规则", "同源者自动竞争，仅留一位"]]
+      facts: [["最大星级", "七星"], ["副本编队", "最多三人，每人每轮一次行动"], ["等级重置", "全额返还升级金币"], ["忠心丸", "永久将忠诚提升至 100"], ["冥王规则", "同源者自动竞争，仅留一位"]]
     },
     nation: {
       title: "国家经营",

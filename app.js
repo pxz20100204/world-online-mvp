@@ -541,6 +541,11 @@
     return Math.floor((hero.baseAtk * 2 + hero.baseHp * .38 + hero.baseDef) * levelScale * starScale * reputationScale);
   }
 
+  function heroLevelResetRefund(level) {
+    const safeLevel = Math.max(1, Number(level) || 1);
+    return 250 * safeLevel * (safeLevel - 1);
+  }
+
   function teamPower() {
     return state.team.reduce((total, id) => total + heroPower(id), 0);
   }
@@ -1109,7 +1114,7 @@
           <div class="skill-row"><strong>${hero.skills[1]} · 战技</strong><span>消耗 25 点气，造成 170% 攻击伤害。</span></div>
           <div class="skill-row"><strong>${hero.skills[2]} · 必杀</strong><span>消耗 80 点气，造成 320% 攻击伤害。</span></div>
         </div>
-        <div class="detail-actions"><button class="button ${teamIndex < 0 ? "primary" : "danger"}" data-action="toggle-team" data-hero-id="${hero.id}">${icon(teamIndex < 0 ? "user-plus" : "user-minus")} ${teamIndex < 0 ? "加入编队" : "移出编队"}</button><button class="button" data-action="level-hero" data-hero-id="${hero.id}" ${state.gold < owned.level * 500 || hero.id === "reputation-master" ? "disabled" : ""}>${icon("arrow-up")} 升级 ${owned.level * 500}</button></div>
+        <div class="detail-actions"><button class="button ${teamIndex < 0 ? "primary" : "danger"}" data-action="toggle-team" data-hero-id="${hero.id}">${icon(teamIndex < 0 ? "user-plus" : "user-minus")} ${teamIndex < 0 ? "加入编队" : "移出编队"}</button><button class="button" data-action="level-hero" data-hero-id="${hero.id}" ${state.gold < owned.level * 500 || hero.id === "reputation-master" ? "disabled" : ""}>${icon("arrow-up")} 升级 ${owned.level * 500}</button><button class="button reset-level-button" data-action="reset-hero-level" data-hero-id="${hero.id}" ${owned.level <= 1 || hero.id === "reputation-master" ? "disabled" : ""}>${icon("rotate-ccw")} 重置等级</button></div>
       </div>
     </aside>`;
   }
@@ -1578,6 +1583,23 @@
     }
   }
 
+  function bossIntent(stage, round) {
+    if (stage.id === 9) {
+      return round % 2 === 1
+        ? { type: "aoe", name: "技能风暴", multiplier: .72, detail: "对全部存活人物造成伤害" }
+        : { type: "single", name: "王之裁定", multiplier: 1.2, detail: "锁定生命比例最低的人物" };
+    }
+    if (stage.id === 8) {
+      return round % 2 === 0
+        ? { type: "aoe", name: "魔化余晖", multiplier: .76, detail: "灼烧全部存活人物" }
+        : { type: "single", name: "落日追斩", multiplier: 1.12, detail: "锁定生命比例最低的人物" };
+    }
+    if (stage.id >= 6 && round % 3 === 0) return { type: "aoe", name: "首领震域", multiplier: .7, detail: "冲击全部存活人物" };
+    if (stage.id >= 3 && round % 3 === 0) return { type: "aoe", name: "震荡冲击", multiplier: .64, detail: "波及全部存活人物" };
+    if (round % 4 === 0) return { type: "aoe", name: "横扫阵列", multiplier: .58, detail: "横扫全部存活人物" };
+    return { type: "single", name: stage.id >= 6 ? "首领强袭" : "集中攻击", multiplier: 1, detail: stage.id >= 6 ? "锁定生命比例最低的人物" : "攻击一名存活人物" };
+  }
+
   function startBattle(stageId) {
     const stage = stages.find((item) => item.id === stageId);
     if (!stage || stage.id > state.stageProgress + 1 || state.energy < stage.energy || !state.team.length) return;
@@ -1587,24 +1609,33 @@
       const owned = heroData(id);
       const scale = (1 + (owned.level - 1) * .11) * (1 + (owned.star - 1) * .19);
       const maxHp = Math.floor(hero.baseHp * scale);
-      return { id, hp: maxHp, maxHp, qi: 20 };
+      return { id, hp: maxHp, maxHp, qi: 20, acted: false, guarding: false };
     });
     const enemyMaxHp = Math.floor(stage.recommended * (stage.id === 9 ? 1.65 : 1.15));
-    ui.battle = { stage, fighters, activeIndex: 0, enemyHp: enemyMaxHp, enemyMaxHp, log: [`进入 ${stage.name}，遭遇 ${stage.enemy}。`], busy: false, finished: false, guarding: false };
+    ui.battle = { stage, fighters, activeIndex: 0, enemyHp: enemyMaxHp, enemyMaxHp, round: 1, enemyIntent: bossIntent(stage, 1), log: [`进入 ${stage.name}，${fighters.length} 人编队遭遇 ${stage.enemy}。`], busy: false, finished: false };
     saveState();
     renderBattle();
   }
 
   function currentFighter() {
     if (!ui.battle) return null;
-    const alive = ui.battle.fighters.filter((fighter) => fighter.hp > 0);
-    if (!alive.length) return null;
-    let tries = 0;
-    while (ui.battle.fighters[ui.battle.activeIndex].hp <= 0 && tries < ui.battle.fighters.length) {
-      ui.battle.activeIndex = (ui.battle.activeIndex + 1) % ui.battle.fighters.length;
-      tries += 1;
+    const battle = ui.battle;
+    const selected = battle.fighters[battle.activeIndex];
+    if (selected?.hp > 0 && !selected.acted) return selected;
+    const availableIndex = battle.fighters.findIndex((fighter) => fighter.hp > 0 && !fighter.acted);
+    if (availableIndex >= 0) {
+      battle.activeIndex = availableIndex;
+      return battle.fighters[availableIndex];
     }
-    return ui.battle.fighters[ui.battle.activeIndex];
+    return battle.fighters.find((fighter) => fighter.hp > 0) || null;
+  }
+
+  function selectBattleFighter(index) {
+    const battle = ui.battle;
+    const fighter = battle?.fighters[index];
+    if (!battle || battle.busy || battle.finished || !fighter || fighter.hp <= 0 || fighter.acted) return;
+    battle.activeIndex = index;
+    renderBattle();
   }
 
   function renderBattle() {
@@ -1614,16 +1645,26 @@
     if (!fighter) return finishBattle(false);
     const hero = getHero(fighter.id);
     const enemy = { name: battle.stage.enemy, rarity: "BOSS", color: battle.stage.enemyColor, accent: "#e6e0ce", shape: battle.stage.enemyShape };
-    const hpPercent = Math.max(0, fighter.hp / fighter.maxHp * 100);
     const enemyPercent = Math.max(0, battle.enemyHp / battle.enemyMaxHp * 100);
-    modalRoot.innerHTML = `<div class="modal-backdrop"><section class="modal battle-modal" role="dialog" aria-modal="true"><div class="battle-head"><div><h2>${battle.stage.id}. ${battle.stage.name}</h2><small>${battle.stage.type} · 回合制讨伐</small></div><button class="button small danger" data-action="retreat">撤退</button></div><div class="battle-field"><div class="fighter" id="fighter-player">${portrait(hero)}<h3>${hero.name}</h3><div class="fighter-bars"><div class="hp-line" style="--hp:${hpPercent}%"><span></span></div><div class="qi-line" style="--qi:${fighter.qi}%"><span></span></div><div class="fighter-stats"><span>生命 ${Math.max(0, fighter.hp)}/${fighter.maxHp}</span><span>气 ${fighter.qi}/100</span></div></div></div><div class="versus">VS</div><div class="fighter enemy" id="fighter-enemy">${portrait(enemy)}<h3>${enemy.name}</h3><div class="fighter-bars"><div class="hp-line" style="--hp:${enemyPercent}%"><span></span></div><div class="fighter-stats"><span>生命 ${Math.max(0, battle.enemyHp)}/${battle.enemyMaxHp}</span><span>${battle.stage.type}</span></div></div></div></div><div class="battle-bottom"><div class="battle-log">${battle.log.slice(-10).map((line, index) => `<p class="${index === battle.log.slice(-10).length - 1 ? "important" : ""}">${line}</p>`).join("")}</div><div class="battle-controls"><div class="turn-label">轮到 ${hero.name} 行动 · 队伍存活 ${battle.fighters.filter((item) => item.hp > 0).length}/${battle.fighters.length}</div><div class="skill-buttons"><button class="skill-button" data-action="battle-skill" data-skill="basic" ${battle.busy ? "disabled" : ""}><strong>${hero.skills[0]}</strong><small>100% 伤害 · 气 +18</small></button><button class="skill-button" data-action="battle-skill" data-skill="skill" ${battle.busy || fighter.qi < 25 ? "disabled" : ""}><strong>${hero.skills[1]}</strong><small>170% 伤害 · 气 -25</small></button><button class="skill-button" data-action="battle-skill" data-skill="ultimate" ${battle.busy || fighter.qi < 80 ? "disabled" : ""}><strong>${hero.skills[2]}</strong><small>320% 伤害 · 气 -80</small></button><button class="skill-button" data-action="battle-skill" data-skill="guard" ${battle.busy ? "disabled" : ""}><strong>稳守</strong><small>恢复 8% 生命 · 本回合减伤</small></button></div></div></div></section></div>`;
+    const living = battle.fighters.filter((item) => item.hp > 0);
+    const actedCount = living.filter((item) => item.acted).length;
+    const awaitingBoss = living.length > 0 && actedCount === living.length;
+    const controlsDisabled = battle.busy || fighter.acted || awaitingBoss;
+    const party = battle.fighters.map((member, index) => {
+      const memberHero = getHero(member.id);
+      const hpPercent = Math.max(0, member.hp / member.maxHp * 100);
+      const status = member.hp <= 0 ? "已倒下" : member.acted ? (member.guarding ? "稳守中" : "已行动") : index === battle.activeIndex ? "当前行动" : "可行动";
+      return `<button class="battle-party-member ${index === battle.activeIndex && member.hp > 0 && !member.acted ? "selected" : ""} ${member.acted ? "acted" : ""} ${member.hp <= 0 ? "dead" : ""}" id="fighter-player-${index}" data-action="select-battle-fighter" data-fighter-index="${index}" ${battle.busy || member.hp <= 0 || member.acted ? "disabled" : ""} aria-label="选择${memberHero.name}"><span class="party-portrait">${portrait(memberHero)}</span><span class="party-info"><strong>${memberHero.name}</strong><span class="hp-line" style="--hp:${hpPercent}%"><span></span></span><small>生命 ${Math.max(0, member.hp)}/${member.maxHp} · 气 ${member.qi}/100</small></span><em>${status}</em></button>`;
+    }).join("");
+    const intent = battle.enemyIntent;
+    modalRoot.innerHTML = `<div class="modal-backdrop"><section class="modal battle-modal" role="dialog" aria-modal="true"><div class="battle-head"><div><h2>${battle.stage.id}. ${battle.stage.name}</h2><small>${battle.stage.type} · 最多三人小队讨伐</small></div><button class="button small danger" data-action="retreat">撤退</button></div><div class="boss-intent ${intent.type}" aria-live="polite"><span>${icon(intent.type === "aoe" ? "scan-line" : "crosshair")} ${intent.type === "aoe" ? "全体预警" : "单体预警"}</span><strong>${intent.name}</strong><small>${intent.detail} · 队伍行动完毕后发动</small></div><div class="battle-field"><div class="battle-party" aria-label="出战队伍">${party}</div><div class="versus">VS</div><div class="fighter enemy" id="fighter-enemy">${portrait(enemy)}<h3>${enemy.name}</h3><div class="fighter-bars"><div class="hp-line" style="--hp:${enemyPercent}%"><span></span></div><div class="fighter-stats"><span>生命 ${Math.max(0, battle.enemyHp)}/${battle.enemyMaxHp}</span><span>${battle.stage.type}</span></div></div></div></div><div class="battle-bottom"><div class="battle-log">${battle.log.slice(-10).map((line, index) => `<p class="${index === battle.log.slice(-10).length - 1 ? "important" : ""}">${line}</p>`).join("")}</div><div class="battle-controls"><div class="turn-label">第 ${battle.round} 轮 · 已行动 ${actedCount}/${living.length} · ${awaitingBoss ? `${battle.stage.enemy}准备发动${intent.name}` : `轮到 ${hero.name}`}</div><div class="skill-buttons"><button class="skill-button" data-action="battle-skill" data-skill="basic" ${controlsDisabled ? "disabled" : ""}><strong>${hero.skills[0]}</strong><small>100% 伤害 · 气 +18</small></button><button class="skill-button" data-action="battle-skill" data-skill="skill" ${controlsDisabled || fighter.qi < 25 ? "disabled" : ""}><strong>${hero.skills[1]}</strong><small>170% 伤害 · 气 -25</small></button><button class="skill-button" data-action="battle-skill" data-skill="ultimate" ${controlsDisabled || fighter.qi < 80 ? "disabled" : ""}><strong>${hero.skills[2]}</strong><small>320% 伤害 · 气 -80</small></button><button class="skill-button" data-action="battle-skill" data-skill="guard" ${controlsDisabled ? "disabled" : ""}><strong>稳守</strong><small>恢复 8% 生命 · 仅自身减伤</small></button></div></div></div></section></div>`;
     refreshIcons();
   }
 
   function battleAction(skill) {
     const battle = ui.battle;
     const fighter = currentFighter();
-    if (!battle || !fighter || battle.busy || battle.finished) return;
+    if (!battle || !fighter || battle.busy || battle.finished || fighter.acted) return;
     const hero = getHero(fighter.id);
     const owned = heroData(hero.id);
     const scale = (1 + (owned.level - 1) * .11) * (1 + (owned.star - 1) * .19);
@@ -1645,7 +1686,7 @@
     } else if (skill === "guard") {
       const healed = Math.floor(fighter.maxHp * .08);
       fighter.hp = Math.min(fighter.maxHp, fighter.hp + healed);
-      battle.guarding = true;
+      fighter.guarding = true;
       actionName = `稳守，恢复 ${healed} 生命`;
     } else {
       battle.busy = false;
@@ -1653,6 +1694,7 @@
     }
     damage = Math.floor(damage);
     if (damage > 0) battle.enemyHp = Math.max(0, battle.enemyHp - damage);
+    fighter.acted = true;
     battle.log.push(`${hero.name}施放${actionName}${damage ? `，造成 ${damage} 伤害` : ""}。`);
     renderBattle();
     if (damage > 0) animateDamage("fighter-enemy", damage);
@@ -1660,7 +1702,17 @@
       setTimeout(() => finishBattle(true), 550);
       return;
     }
-    setTimeout(enemyTurn, 650);
+    const nextIndex = battle.fighters.findIndex((member) => member.hp > 0 && !member.acted);
+    if (nextIndex >= 0) {
+      setTimeout(() => {
+        if (!ui.battle || ui.battle.finished) return;
+        battle.activeIndex = nextIndex;
+        battle.busy = false;
+        renderBattle();
+      }, 360);
+    } else {
+      setTimeout(enemyTurn, 650);
+    }
   }
 
   function animateDamage(targetId, damage) {
@@ -1675,21 +1727,46 @@
 
   function enemyTurn() {
     const battle = ui.battle;
-    const fighter = currentFighter();
-    if (!battle || !fighter || battle.finished) return;
-    const base = battle.stage.recommended / (battle.stage.id === 9 ? 15 : 17);
-    let damage = Math.floor(base * (.82 + Math.random() * .34));
-    if (battle.guarding) damage = Math.floor(damage * .46);
-    battle.guarding = false;
-    fighter.hp = Math.max(0, fighter.hp - damage);
-    const enemySkill = battle.stage.id >= 8 && Math.random() < .28 ? "首领技" : "攻击";
-    battle.log.push(`${battle.stage.enemy}发动${enemySkill}，${getHero(fighter.id).name}受到 ${damage} 伤害。`);
-    if (fighter.hp <= 0) battle.log.push(`${getHero(fighter.id).name}暂时退出战斗。`);
-    battle.activeIndex = (battle.activeIndex + 1) % battle.fighters.length;
+    if (!battle || battle.finished) return;
+    const living = battle.fighters.map((fighter, index) => ({ fighter, index })).filter(({ fighter }) => fighter.hp > 0);
+    if (!living.length) return finishBattle(false);
+    const intent = battle.enemyIntent;
+    const targets = intent.type === "aoe"
+      ? living
+      : [battle.stage.id >= 6
+        ? living.slice().sort((a, b) => a.fighter.hp / a.fighter.maxHp - b.fighter.hp / b.fighter.maxHp)[0]
+        : living[Math.floor(Math.random() * living.length)]];
+    const hits = targets.map(({ fighter, index }) => {
+      const hero = getHero(fighter.id);
+      const owned = heroData(fighter.id);
+      const defense = hero.baseDef * (1 + (owned.level - 1) * .06) * (1 + (owned.star - 1) * .12);
+      const mitigation = 100 / (100 + defense * .22);
+      const base = battle.stage.recommended / (battle.stage.id === 9 ? 15 : 17);
+      let damage = Math.max(1, Math.floor(base * intent.multiplier * (.9 + Math.random() * .2) * mitigation));
+      if (fighter.guarding) damage = Math.max(1, Math.floor(damage * .45));
+      fighter.hp = Math.max(0, fighter.hp - damage);
+      return { fighter, index, hero, damage };
+    });
+    if (intent.type === "aoe") {
+      battle.log.push(`${battle.stage.enemy}发动${intent.name}，对 ${hits.length} 名人物共造成 ${hits.reduce((sum, hit) => sum + hit.damage, 0)} 伤害。`);
+    } else {
+      const hit = hits[0];
+      battle.log.push(`${battle.stage.enemy}发动${intent.name}，${hit.hero.name}受到 ${hit.damage} 伤害。`);
+    }
+    hits.filter(({ fighter }) => fighter.hp <= 0).forEach(({ hero }) => battle.log.push(`${hero.name}暂时退出战斗。`));
+    const defeated = battle.fighters.every((fighter) => fighter.hp <= 0);
+    if (defeated) {
+      hits.forEach(({ index, damage }) => animateDamage(`fighter-player-${index}`, damage));
+      setTimeout(() => finishBattle(false), 500);
+      return;
+    }
+    battle.fighters.forEach((fighter) => { fighter.acted = false; fighter.guarding = false; });
+    battle.round += 1;
+    battle.enemyIntent = bossIntent(battle.stage, battle.round);
+    battle.activeIndex = battle.fighters.findIndex((fighter) => fighter.hp > 0);
     battle.busy = false;
     renderBattle();
-    animateDamage("fighter-player", damage);
-    if (!currentFighter()) setTimeout(() => finishBattle(false), 500);
+    hits.forEach(({ index, damage }) => animateDamage(`fighter-player-${index}`, damage));
   }
 
   function gainExp(amount) {
@@ -1853,9 +1930,24 @@
       if (!state.roster[id] || state.gold < cost || id === "reputation-master") return;
       state.gold -= cost; owned.level += 1; saveState(); renderHeroes(); refreshIcons(); toast(`${getHero(id).name}升至 Lv.${owned.level}`, "arrow-up");
     }
+    if (action === "reset-hero-level") {
+      const id = actionButton.dataset.heroId; const owned = state.roster[id]; const hero = getHero(id);
+      if (!owned || !hero || owned.level <= 1 || id === "reputation-master") return;
+      const refund = heroLevelResetRefund(owned.level);
+      const body = `<div class="reset-level-summary">${portrait(hero)}<div><strong>${hero.name} · Lv.${owned.level} → Lv.1</strong><p>返还历次升级花费 <b>${formatNumber(refund)} 金币</b>。星级、碎片和编队位置全部保留。</p></div></div>`;
+      showModal(modalShell("重置人物等级？", body, `<button class="button" data-action="close-modal">取消</button><button class="button danger" data-action="confirm-reset-hero" data-hero-id="${id}">${icon("rotate-ccw")} 重置并返还</button>`));
+    }
+    if (action === "confirm-reset-hero") {
+      const id = actionButton.dataset.heroId; const owned = state.roster[id]; const hero = getHero(id);
+      if (!owned || !hero || owned.level <= 1 || id === "reputation-master") return closeModal();
+      const refund = heroLevelResetRefund(owned.level);
+      owned.level = 1; state.gold += refund; saveState(); closeModal(); renderHeroes(); refreshIcons();
+      toast(`${hero.name}已重置为 Lv.1，返还 ${formatNumber(refund)} 金币`, "rotate-ccw");
+    }
     if (action === "summon") doSummon(Number(actionButton.dataset.count));
     if (action === "summon-history") showModal(modalShell("召唤规则", `<div class="lore-section"><h2>完整人物</h2><p>每次召唤直接获得完整人物，不会只获得碎片。重复人物自动升星，七星后转为 80 枚碎片。</p></div><div class="lore-section" style="margin-top:18px"><h2>公平与保底</h2><p>十连至少获得一位 SR，七十次内必得 SSR 或 UR。开局礼包不会出现足以直接跳过多个村落的服务器级人物。</p></div>`, `<button class="button" data-action="close-modal">关闭</button>`));
     if (action === "start-battle") startBattle(Number(actionButton.dataset.stageId));
+    if (action === "select-battle-fighter") selectBattleFighter(Number(actionButton.dataset.fighterIndex));
     if (action === "battle-skill") battleAction(actionButton.dataset.skill);
     if (action === "retreat") { ui.battle = null; closeModal(); toast("已撤回主城，行动力不返还", "log-out"); }
     if (action === "onboarding-next") {
