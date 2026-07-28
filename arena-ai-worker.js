@@ -11,6 +11,13 @@ function scoreActions(snapshot) {
   const scores = Object.fromEntries(ACTIONS.map((action) => [action, -1000]));
 
   if (self.dead) return { action: "hold", scores, reason: "等待复活" };
+  if (enemy.visible === false) {
+    scores.hold = snapshot.towerCover ? 46 : 22;
+    scores.advance = snapshot.allyMinionCover ? 38 : 18;
+    scores.retreat = self.hp / Math.max(1, self.maxHp) < .3 ? 62 : 12;
+    const action = scores.retreat > scores.advance ? "retreat" : scores.advance > scores.hold ? "advance" : "hold";
+    return { action, scores, reason: action === "retreat" ? "目标隐匿，退出未知伤害区" : action === "advance" ? "目标隐匿，借兵线恢复视野" : "目标隐匿，保持安全视野" };
+  }
 
   const recent = snapshot.playerHistory || [];
   const aggressive = recent.filter((action) => ["advance", "basic", "skill1", "ultimate"].includes(action)).length;

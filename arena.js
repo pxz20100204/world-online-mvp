@@ -4,6 +4,11 @@ const WIDTH = 1280;
 const HEIGHT = 720;
 const POSITION_SCALE = .3;
 const VALID_ACTIONS = new Set(["advance", "retreat", "hold", "basic", "skill1", "skill2", "ultimate"]);
+const TACTICAL_ZONES = Object.freeze([
+  { id: "river", label: "左侧河床", min: 30, max: 43, speed: .8 },
+  { id: "brush", label: "中路草丛", min: 46, max: 57, speed: .88 },
+  { id: "highland", label: "右侧高地", min: 64, max: 83, speed: .94 }
+]);
 let activeArena = null;
 
 function clamp(value, min, max) {
@@ -65,6 +70,10 @@ class ArenaRuntime {
     this.cameraShake = 0;
     this.pointerState = null;
     this.resizeObserver = null;
+    this.lightningPoints = Array.isArray(options.worldRules?.lightningPoints) && options.worldRules.lightningPoints.length
+      ? options.worldRules.lightningPoints.map((point) => clamp(Number(point) || 50, 8, 92))
+      : [34, 52, 70];
+    this.monsterMultiplier = clamp(Number(options.worldRules?.monsterMultiplier) || 1, .8, 1.45);
   }
 
   start() {
@@ -130,7 +139,14 @@ class ArenaRuntime {
   }
 
   terrainHeight(x, z) {
-    return -.35 + Math.sin(x * .31) * .16 + Math.cos(z * .48) * .13 + Math.sin((x + z) * .21) * .09;
+    const position = x / POSITION_SCALE + 50;
+    const riverDip = position >= 30 && position <= 43 ? -Math.sin((position - 30) / 13 * Math.PI) * .34 : 0;
+    const highlandRise = position <= 62 ? 0 : position >= 69 ? .58 : (position - 62) / 7 * .58;
+    return -.35 + riverDip + highlandRise + Math.sin(x * .31) * .16 + Math.cos(z * .48) * .13 + Math.sin((x + z) * .21) * .09;
+  }
+
+  terrainZone(position) {
+    return TACTICAL_ZONES.find((zone) => position >= zone.min && position <= zone.max) || { id: "lane", label: "中路石道", min: 0, max: 100, speed: 1 };
   }
 
   laneCoordinates(position, lift = 0, rowOffset = 0) {
@@ -208,7 +224,43 @@ class ArenaRuntime {
     this.world.add(lane);
     this.createStonePaving(random);
     this.createForest(random);
+    this.createTacticalTerrain(random);
     this.createArenaRunes();
+  }
+
+  createTacticalTerrain(random) {
+    const grassCount = this.compactVisuals ? 28 : 54;
+    const grass = new THREE.InstancedMesh(
+      new THREE.ConeGeometry(.11, .72, 3),
+      new THREE.MeshStandardMaterial({ color: 0x3e7850, roughness: 1, flatShading: true, side: THREE.DoubleSide }),
+      grassCount
+    );
+    const dummy = new THREE.Object3D();
+    for (let index = 0; index < grassCount; index += 1) {
+      const position = 46 + random() * 11;
+      const row = (random() - .5) * 3.05;
+      const point = this.laneCoordinates(position, .2, row);
+      dummy.position.copy(point);
+      dummy.rotation.set((random() - .5) * .18, random() * Math.PI, (random() - .5) * .22);
+      const scale = .75 + random() * .7;
+      dummy.scale.set(scale, scale, scale);
+      dummy.updateMatrix();
+      grass.setMatrixAt(index, dummy.matrix);
+      grass.setColorAt(index, new THREE.Color(index % 3 === 0 ? 0x4d8959 : 0x346b49));
+    }
+    grass.castShadow = !this.compactVisuals;
+    grass.receiveShadow = true;
+    this.world.add(grass);
+
+    const ridgeMaterial = this.standardMaterial(0x657064, { roughness: 1 });
+    for (const [position, row] of [[62.5, -2.25], [63.1, 2.2], [65.1, -2.45], [65.6, 2.4]]) {
+      const point = this.laneCoordinates(position, .34, row);
+      const ridge = this.prepareMesh(new THREE.Mesh(new THREE.DodecahedronGeometry(.46 + random() * .18, 0), ridgeMaterial.clone()));
+      ridge.position.copy(point);
+      ridge.rotation.set(random(), random() * Math.PI, random());
+      ridge.scale.y = 1.35;
+      this.world.add(ridge);
+    }
   }
 
   createRibbon(points, width, material) {
@@ -358,13 +410,15 @@ class ArenaRuntime {
       skill1Range: 12,
       ultimateRange: 14.5
     });
-    return {
+    const match = {
       elapsed: 0,
       timeLimit: 180,
       nextWaveAt: .8,
       wave: 0,
       minionId: 0,
       minions: [],
+      nextLightningAt: 12,
+      lightningIndex: 0,
       playerHistory: [],
       player: makeHero("player", this.options.playerHero, 13),
       king: makeHero("king", this.options.kingHero, 87),
@@ -378,6 +432,10 @@ class ArenaRuntime {
       winner: null,
       log: []
     };
+    for (const entity of [match.player, match.king]) this.updateTacticalState(entity, true);
+    match.king.maxHp = Math.floor(match.king.maxHp * this.monsterMultiplier);
+    match.king.hp = match.king.maxHp;
+    return match;
   }
 
   standardMaterial(color, options = {}) {
@@ -893,6 +951,7 @@ class ArenaRuntime {
     this.stepMinions(dt);
     this.stepTower(match.structures.playerTower, dt);
     this.stepTower(match.structures.kingTower, dt);
+    this.stepWorldHazards();
     this.aiAccumulator += dt;
     if (this.aiAccumulator >= .4) {
       this.aiAccumulator = 0;
@@ -918,6 +977,7 @@ class ArenaRuntime {
         entity.hp = entity.maxHp;
         entity.shield = 0;
         entity.pos = entity.side === "player" ? 11 : 89;
+        this.updateTacticalState(entity, true);
         this.emitLog(`${entity.hero.name}重新进入野局。`);
       }
       return;
@@ -931,10 +991,46 @@ class ArenaRuntime {
     }
     entity.moving = entity.moveUntil > this.match.elapsed && entity.stunUntil <= this.match.elapsed;
     if (entity.moving) {
-      const speed = (4.4 + entity.level * .08) * entity.moveDirection;
-      entity.pos = clamp(entity.pos + speed * dt, 5, 95);
+      const zone = this.terrainZone(entity.pos);
+      const nextPosition = clamp(entity.pos + (4.4 + entity.level * .08) * zone.speed * entity.moveDirection * dt, 5, 95);
+      const climbingRidge = entity.pos < 64 && nextPosition >= 64;
+      entity.pos = climbingRidge ? Math.min(nextPosition, entity.pos + 2.2 * dt) : nextPosition;
     }
+    this.updateTacticalState(entity);
     this.stepQueuedAction(entity);
+  }
+
+  updateTacticalState(entity, silent = false) {
+    const previousZone = entity.zone;
+    const previousConcealed = Boolean(entity.concealed);
+    const zone = this.terrainZone(entity.pos);
+    entity.zone = zone.id;
+    entity.zoneLabel = zone.label;
+    entity.concealed = zone.id === "brush";
+    entity.highGround = zone.id === "highland";
+    if (silent || previousZone === undefined) return;
+    if (entity.concealed && !previousConcealed) {
+      const opponent = this.match[opposingSide(entity.side)];
+      if (opponent?.queuedAction) opponent.queuedAction = null;
+      this.emitLog(`${entity.hero.name}进入中路草丛，敌方远程锁定立即失效。`);
+    } else if (!entity.concealed && previousConcealed) {
+      this.emitLog(`${entity.hero.name}离开草丛，重新进入公开视野。`);
+    } else if (previousZone !== zone.id && entity.side === "player") {
+      this.emitLog(`${entity.hero.name}进入${zone.label}。`);
+    }
+  }
+
+  hasVision(observerSide, target) {
+    if (!target?.hero || target.dead) return true;
+    const observer = this.match[observerSide];
+    if (!observer || observer.dead) return false;
+    const distance = Math.abs(observer.pos - target.pos);
+    const alliedScout = this.match.minions.some((unit) => unit.alive && unit.side === observerSide && Math.abs(unit.pos - target.pos) <= 3.2);
+    if (target.concealed && !(observer.concealed && Math.abs(observer.pos - target.pos) <= 8) && distance > 3.2 && !alliedScout) return false;
+    if (target.highGround && !observer.highGround && distance > 8 && !alliedScout) return false;
+    const crossesRidge = Math.min(observer.pos, target.pos) < 63.2 && Math.max(observer.pos, target.pos) > 65.2;
+    if (crossesRidge && !observer.highGround && distance > 10 && !alliedScout) return false;
+    return true;
   }
 
   stepPendingCast(entity) {
@@ -942,7 +1038,7 @@ class ArenaRuntime {
     if (!cast || this.match.elapsed < cast.fireAt) return;
     entity.pendingCast = null;
     let target = cast.target;
-    const targetAlive = target && target.hp > 0 && !target.dead && target.alive !== false;
+    const targetAlive = target && target.hp > 0 && !target.dead && target.alive !== false && this.hasVision(entity.side, target);
     if (!targetAlive) target = this.heroTarget(entity, entity.skill1Range);
     if (!target) {
       this.emitLog(`${entity.hero.name}的妈妈炮失去目标，蓄积能量安全消散。`);
@@ -1020,7 +1116,7 @@ class ArenaRuntime {
     const enemyMinions = this.match.minions.filter((other) => other.alive && other.side === enemySide).sort((left, right) => Math.abs(left.pos - minion.pos) - Math.abs(right.pos - minion.pos));
     if (enemyMinions[0] && Math.abs(enemyMinions[0].pos - minion.pos) <= minion.range) return enemyMinions[0];
     const enemyHero = this.match[enemySide];
-    if (!enemyHero.dead && Math.abs(enemyHero.pos - minion.pos) <= minion.range) return enemyHero;
+    if (!enemyHero.dead && this.hasVision(minion.side, enemyHero) && Math.abs(enemyHero.pos - minion.pos) <= minion.range) return enemyHero;
     const tower = this.match.structures[`${enemySide}Tower`];
     if (tower.hp > 0) return tower;
     return this.match.structures[`${enemySide}Core`];
@@ -1033,11 +1129,50 @@ class ArenaRuntime {
     const enemySide = opposingSide(tower.side);
     const minion = this.match.minions.filter((unit) => unit.alive && unit.side === enemySide && Math.abs(unit.pos - tower.pos) <= 11).sort((left, right) => Math.abs(left.pos - tower.pos) - Math.abs(right.pos - tower.pos))[0];
     const hero = this.match[enemySide];
-    const target = minion || (!hero.dead && Math.abs(hero.pos - tower.pos) <= 11 ? hero : null);
+    const target = minion || (!hero.dead && this.hasVision(tower.side, hero) && Math.abs(hero.pos - tower.pos) <= 11 ? hero : null);
     if (!target) return;
     this.dealDamage(target, 245 + this.match.elapsed * .55, tower.side, "防御塔");
     tower.cooldown = .9;
     this.projectile(tower.pos, target.pos, 0xf2c069, 5, "tower", 0);
+  }
+
+  stepWorldHazards() {
+    if (this.match.elapsed < this.match.nextLightningAt) return;
+    const point = this.lightningPoints[this.match.lightningIndex % this.lightningPoints.length];
+    this.match.lightningIndex += 1;
+    this.match.nextLightningAt += 14;
+    this.lightningStrike(point);
+  }
+
+  lightningStrike(position) {
+    const radius = 4.4;
+    const hits = [];
+    for (const side of ["player", "king"]) {
+      const entity = this.match[side];
+      if (!entity.dead && Math.abs(entity.pos - position) <= radius) {
+        const damage = this.dealDamage(entity, entity.maxHp * .085, opposingSide(side), "天降雷击", { shieldPenetration: .2 });
+        hits.push(`${entity.hero.name} ${damage}`);
+      }
+    }
+    for (const minion of this.match.minions) {
+      if (!minion.alive || Math.abs(minion.pos - position) > radius) continue;
+      const damage = this.dealDamage(minion, minion.maxHp * .42, opposingSide(minion.side), "天降雷击");
+      if (damage) hits.push(`小兵 ${damage}`);
+    }
+    const origin = this.laneCoordinates(position, 5.3);
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(.08, .42, 10.5, 7),
+      new THREE.MeshBasicMaterial({ color: 0xa9e7ff, transparent: true, opacity: .88, blending: THREE.AdditiveBlending, depthWrite: false })
+    );
+    beam.position.copy(origin);
+    this.world.add(beam);
+    this.addEffect(beam, .5, (progress) => {
+      beam.scale.x = beam.scale.z = 1 + progress * 2.4;
+      beam.material.opacity = .88 * (1 - progress);
+    });
+    this.flashAt(position, 0x9eeeff, 2.2);
+    this.cameraShake = this.reducedMotion ? 0 : .18;
+    this.emitLog(`雷击落在权威坐标 ${position}${hits.length ? `，命中 ${hits.join("、")}` : "，无人受创"}。`);
   }
 
   dealDamage(target, rawDamage, sourceSide, sourceName, options = {}) {
@@ -1195,7 +1330,7 @@ class ArenaRuntime {
     const enemySide = opposingSide(entity.side);
     const candidates = this.match.minions.filter((unit) => unit.alive && unit.side === enemySide);
     const enemyHero = this.match[enemySide];
-    if (!enemyHero.dead) candidates.push(enemyHero);
+    if (!enemyHero.dead && this.hasVision(entity.side, enemyHero)) candidates.push(enemyHero);
     const tower = this.match.structures[`${enemySide}Tower`];
     if (tower.hp > 0) candidates.push(tower);
     else {
@@ -1208,7 +1343,8 @@ class ArenaRuntime {
   heroTarget(entity, range) {
     const enemySide = opposingSide(entity.side);
     const enemyHero = this.match[enemySide];
-    if (!enemyHero.dead && Math.abs(enemyHero.pos - entity.pos) <= range) return enemyHero;
+    const visionRange = entity.highGround ? range + 2 : range;
+    if (!enemyHero.dead && this.hasVision(entity.side, enemyHero) && Math.abs(enemyHero.pos - entity.pos) <= visionRange) return enemyHero;
     const enemyMinion = this.match.minions.filter((unit) => unit.alive && unit.side === enemySide && Math.abs(unit.pos - entity.pos) <= range).sort((left, right) => Math.abs(left.pos - entity.pos) - Math.abs(right.pos - entity.pos))[0];
     if (enemyMinion) return enemyMinion;
     const tower = this.match.structures[`${enemySide}Tower`];
@@ -1262,6 +1398,7 @@ class ArenaRuntime {
   aiSnapshot() {
     const self = this.match.king;
     const enemy = this.match.player;
+    const enemyVisible = this.hasVision("king", enemy);
     const enemyTower = this.match.structures.playerTower;
     const allyMinionCover = this.match.minions.some((unit) => unit.alive && unit.side === "king" && Math.abs(unit.pos - self.pos) <= 8);
     return {
@@ -1270,20 +1407,22 @@ class ArenaRuntime {
         cooldowns: Object.assign({}, self.cooldowns), basicRange: self.basicRange, skill1Range: self.skill1Range, ultimateRange: self.ultimateRange,
         channeling: Boolean(self.pendingCast)
       },
-      enemy: { hp: enemy.hp, maxHp: enemy.maxHp, pos: enemy.pos, moving: enemy.moving, shield: enemy.shield, cooldowns: Object.assign({}, enemy.cooldowns), channeling: Boolean(enemy.pendingCast) },
+      enemy: { hp: enemy.hp, maxHp: enemy.maxHp, pos: enemyVisible ? enemy.pos : self.pos - 18, visible: enemyVisible, moving: enemyVisible && enemy.moving, shield: enemyVisible ? enemy.shield : 0, cooldowns: enemyVisible ? Object.assign({}, enemy.cooldowns) : {}, channeling: enemyVisible && Boolean(enemy.pendingCast) },
       playerHistory: this.match.playerHistory.slice(-8),
       allyMinionCover,
       towerCover: Math.abs(self.pos - this.match.structures.kingTower.pos) <= 10 && this.match.structures.kingTower.hp > 0,
       towerDanger: Math.abs(self.pos - enemyTower.pos) <= 11 && enemyTower.hp > 0,
       underEnemyTower: Math.abs(self.pos - enemyTower.pos) <= 11 && enemyTower.hp > 0,
-      enemyChanneling: Boolean(enemy.pendingCast) || enemy.cooldowns.ultimate > 17.5,
-      objectiveOpen: enemyTower.hp <= 0
+      enemyChanneling: enemyVisible && (Boolean(enemy.pendingCast) || enemy.cooldowns.ultimate > 17.5),
+      objectiveOpen: enemyTower.hp <= 0,
+      terrain: { selfZone: self.zone, enemyZone: enemyVisible ? enemy.zone : "hidden", lightningPoints: this.lightningPoints.slice() }
     };
   }
 
   fallbackAiAction() {
     const king = this.match.king;
     const player = this.match.player;
+    if (!this.hasVision("king", player)) return king.hp / king.maxHp < .3 ? "retreat" : "advance";
     const distance = Math.abs(king.pos - player.pos);
     if (king.hp / king.maxHp < .25) return "retreat";
     if (distance <= king.basicRange && king.cooldowns.basic <= 0) return "basic";
@@ -1585,7 +1724,10 @@ class ArenaRuntime {
     sprite.position.copy(origin).add(new THREE.Vector3(0, .65, 0));
     this.world.add(sprite);
     this.addEffect(sprite, .85, (progress) => {
-      sprite.position.y += .015;
+      const bounce = Math.sin(progress * Math.PI) * (heavy ? .42 : .26);
+      sprite.position.y += .012 + bounce * .018;
+      const scale = 1 + Math.sin(progress * Math.PI * 2) * .16 * (1 - progress);
+      sprite.scale.set((heavy ? 1.45 : 1.05) * scale, (heavy ? .38 : .28) * scale, 1);
       sprite.material.opacity = 1 - progress;
     });
   }
@@ -1633,7 +1775,8 @@ class ArenaRuntime {
       const entity = this.match[side];
       const visual = this.heroVisuals[side];
       visual.root.position.copy(this.laneCoordinates(entity.pos));
-      visual.root.visible = !entity.dead;
+      const visibleToPlayer = side === "player" || this.hasVision("player", entity);
+      visual.root.visible = !entity.dead && visibleToPlayer;
       visual.shield.visible = entity.shield > 0;
       if (visual.shield.visible) {
         visual.shield.rotation.y = now * 1.8;
@@ -1832,6 +1975,11 @@ class ArenaRuntime {
       hp: Math.floor(entity.hp), maxHp: Math.floor(entity.maxHp), level: entity.level, xp: entity.xp,
       gold: entity.gold, kills: entity.kills, deaths: entity.deaths, dead: entity.dead, respawn: Math.max(0, entity.respawn),
       queuedAction: entity.queuedAction,
+      zone: entity.zone,
+      zoneLabel: entity.zoneLabel,
+      concealed: Boolean(entity.concealed),
+      highGround: Boolean(entity.highGround),
+      visible: entity.side === "player" || this.hasVision("player", entity),
       channeling: Boolean(entity.pendingCast),
       castAction: entity.pendingCast?.action || "",
       castRemaining: entity.pendingCast ? Math.max(0, entity.pendingCast.fireAt - this.match.elapsed) : 0,
@@ -1850,6 +1998,13 @@ class ArenaRuntime {
       kingCore: this.match.structures.kingCore.hp,
       log: this.match.log.slice(),
       ai: Object.assign({}, this.aiTelemetry),
+      terrain: {
+        playerZone: this.match.player.zoneLabel,
+        kingZone: this.hasVision("player", this.match.king) ? this.match.king.zoneLabel : "视野外",
+        kingVisible: this.hasVision("player", this.match.king),
+        lightningPoints: this.lightningPoints.slice(),
+        nextLightningIn: Math.max(0, this.match.nextLightningAt - this.match.elapsed)
+      },
       view: { azimuth: this.cameraAzimuth, elevation: this.cameraElevation, zoom: this.cameraZoom },
       finished: this.match.finished,
       winner: this.match.winner
@@ -1885,5 +2040,5 @@ window.WorldArena = {
   stop,
   isRunning: () => Boolean(activeArena && activeArena.match && !activeArena.match.finished),
   snapshot: () => activeArena?.hudSnapshot() || null,
-  version: "2.1.0-three-0.185.1"
+  version: "2.2.0-three-0.185.1"
 };

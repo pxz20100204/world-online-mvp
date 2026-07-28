@@ -1,10 +1,11 @@
-const CACHE_VERSION = "world-online-shell-v0.13.0";
+const CACHE_VERSION = "world-online-shell-v0.14.0";
 const CORE_ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
   "./game-data.js",
+  "./world-ecology.js",
   "./supabase-config.js",
   "./local-guide-worker.js",
   "./manifest.webmanifest",
@@ -55,7 +56,7 @@ async function staleWhileRevalidate(request) {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
-  if (event.request.mode === "navigate" || /\/(app\.js|styles\.css|game-data\.js|index\.html|deployment\.json)$/.test(url.pathname)) {
+  if (event.request.mode === "navigate" || /\/(app\.js|arena\.js|arena-ai-worker\.js|styles\.css|game-data\.js|world-ecology\.js|index\.html|deployment\.json)$/.test(url.pathname)) {
     event.respondWith(networkFirst(event.request));
     return;
   }
