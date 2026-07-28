@@ -351,6 +351,7 @@ class ArenaRuntime {
       moveDirection: 0,
       moveUntil: 0,
       queuedAction: null,
+      pendingCast: null,
       stunUntil: 0,
       cooldowns: { basic: 0, skill1: 0, skill2: 0, ultimate: 0 },
       basicRange: 7.5,
@@ -421,7 +422,7 @@ class ArenaRuntime {
     model.rotation.y = entity.side === "player" ? Math.PI / 2 : -Math.PI / 2;
     root.add(model);
     const billboard = this.createStatusBillboard(`${entity.hero.name}`, teamColor, 1.8);
-    billboard.group.position.y = 3.18;
+    billboard.group.position.y = entity.hero.id === "egg-lord" ? 3.72 : entity.hero.id === "sunset-steward" ? 3.42 : 3.18;
     root.add(billboard.group);
     root.position.copy(this.laneCoordinates(entity.pos));
     this.world.add(root);
@@ -443,6 +444,7 @@ class ArenaRuntime {
   }
 
   createLowPolyHero(hero, primary, accent) {
+    if (hero.id === "egg-lord") return this.createEggLordModel();
     const model = new THREE.Group();
     const dark = shadeColor(primary, -62);
     const skin = hero.shape === "egg" ? 0xeadbb2 : 0xd4ab86;
@@ -499,7 +501,200 @@ class ArenaRuntime {
     model.add(weapon);
     this.addHeroAccessory(model, hero.shape, primary, accent);
     model.userData = { torso, leftLeg, rightLeg, leftArm, rightArm, weapon };
+    if (hero.id === "sunset-steward") this.addSunsetStewardDetails(model, primary, accent);
     return model;
+  }
+
+  createEggLordModel() {
+    const model = new THREE.Group();
+    const ivory = 0xf2eee4;
+    const vermilion = 0xd94b3f;
+    const teal = 0x208b87;
+    const charcoal = 0x252a2d;
+    const yolk = 0xffb632;
+    const outline = this.standardMaterial(charcoal, { roughness: .82 });
+    const ivoryMaterial = this.standardMaterial(ivory, { roughness: .76 });
+    const redMaterial = this.standardMaterial(vermilion, { roughness: .7 });
+    const tealMaterial = this.standardMaterial(teal, { roughness: .64 });
+    const yolkMaterial = this.standardMaterial(yolk, { emissive: 0x8a4a00, emissiveIntensity: .13, roughness: .58 });
+
+    const torso = this.prepareMesh(new THREE.Mesh(new THREE.BoxGeometry(.78, .92, .48), ivoryMaterial));
+    torso.position.set(0, 1.27, 0);
+    model.add(torso);
+    const chestStripe = this.prepareMesh(new THREE.Mesh(new THREE.BoxGeometry(.18, .94, .035), redMaterial));
+    chestStripe.position.set(0, 1.27, .258);
+    model.add(chestStripe);
+    const waistFrame = this.prepareMesh(new THREE.Mesh(new THREE.BoxGeometry(.86, .2, .56), outline));
+    waistFrame.position.set(0, .91, 0);
+    model.add(waistFrame);
+    const beltCore = this.prepareMesh(new THREE.Mesh(new THREE.CapsuleGeometry(.16, .22, 2, 7), outline));
+    beltCore.rotation.z = Math.PI / 2;
+    beltCore.position.set(0, 1.03, .34);
+    model.add(beltCore);
+    const beltLight = new THREE.Mesh(new THREE.SphereGeometry(.105, 10, 6), yolkMaterial);
+    beltLight.scale.z = .42;
+    beltLight.position.set(0, 1.03, .47);
+    model.add(beltLight);
+
+    const leftCape = this.prepareMesh(new THREE.Mesh(new THREE.ConeGeometry(.39, 1.25, 3), redMaterial));
+    leftCape.position.set(-.31, .75, -.28);
+    leftCape.rotation.z = -.2;
+    const rightCape = this.prepareMesh(new THREE.Mesh(new THREE.ConeGeometry(.39, 1.25, 3), tealMaterial));
+    rightCape.position.set(.31, .75, -.28);
+    rightCape.rotation.z = .2;
+    model.add(leftCape, rightCape);
+
+    const makeLeg = (x, bootColor, bootAngle) => {
+      const leg = new THREE.Group();
+      const shin = this.prepareMesh(new THREE.Mesh(new THREE.BoxGeometry(.22, .62, .25), ivoryMaterial));
+      shin.position.y = .1;
+      const boot = this.prepareMesh(new THREE.Mesh(new THREE.BoxGeometry(.36, .18, .48), this.standardMaterial(bootColor)));
+      boot.position.set(bootAngle * .04, -.28, .1);
+      boot.rotation.y = bootAngle * .12;
+      leg.position.set(x, .52, 0);
+      leg.add(shin, boot);
+      model.add(leg);
+      return leg;
+    };
+    const leftLeg = makeLeg(-.24, teal, -1);
+    const rightLeg = makeLeg(.24, vermilion, 1);
+
+    const shell = this.prepareMesh(new THREE.Mesh(new THREE.SphereGeometry(.68, 14, 10), ivoryMaterial));
+    shell.scale.set(1.06, 1.08, .48);
+    shell.position.set(0, 2.17, 0);
+    model.add(shell);
+    const yolkFace = this.prepareMesh(new THREE.Mesh(new THREE.SphereGeometry(.46, 14, 9), yolkMaterial));
+    yolkFace.scale.set(1, 1.02, .23);
+    yolkFace.position.set(0, 2.15, .58);
+    model.add(yolkFace);
+    const faceMaterial = new THREE.MeshBasicMaterial({ color: charcoal });
+    for (const x of [-.15, .15]) {
+      const eye = new THREE.Mesh(new THREE.BoxGeometry(.07, .22, .035), faceMaterial);
+      eye.position.set(x, 2.22, .7);
+      eye.rotation.z = x < 0 ? -.09 : .09;
+      model.add(eye);
+    }
+    const smile = new THREE.Mesh(new THREE.TorusGeometry(.21, .025, 5, 18, Math.PI * .86), faceMaterial);
+    smile.position.set(.135, 2.05, .705);
+    smile.rotation.z = Math.PI * 1.07;
+    model.add(smile);
+
+    const crownBand = this.prepareMesh(new THREE.Mesh(new THREE.BoxGeometry(1.02, .16, .53), outline));
+    crownBand.position.set(0, 2.72, -.02);
+    model.add(crownBand);
+    const innerBand = this.prepareMesh(new THREE.Mesh(new THREE.BoxGeometry(.92, .11, .56), ivoryMaterial));
+    innerBand.position.set(0, 2.73, .01);
+    model.add(innerBand);
+    for (const [x, height, angle] of [[-.31, .52, -.18], [0, .65, 0], [.31, .52, .18]]) {
+      const rim = this.prepareMesh(new THREE.Mesh(new THREE.ConeGeometry(.2, height + .07, 4), outline));
+      rim.position.set(x, 2.95 + height * .17, -.01);
+      rim.rotation.z = angle;
+      const shard = this.prepareMesh(new THREE.Mesh(new THREE.ConeGeometry(.16, height, 4), ivoryMaterial));
+      shard.position.copy(rim.position);
+      shard.position.z += .035;
+      shard.rotation.z = angle;
+      model.add(rim, shard);
+    }
+
+    const makeArm = (side, material, angle) => {
+      const arm = new THREE.Group();
+      const sleeve = this.prepareMesh(new THREE.Mesh(new THREE.CapsuleGeometry(.13, .58, 2, 6), material));
+      sleeve.rotation.z = angle;
+      const hand = this.prepareMesh(new THREE.Mesh(new THREE.SphereGeometry(.14, 8, 6), ivoryMaterial));
+      hand.position.set(Math.sin(-angle) * .39, -Math.cos(angle) * .39, .02);
+      arm.position.set(side * .48, 1.52, .02);
+      arm.add(sleeve, hand);
+      model.add(arm);
+      return arm;
+    };
+    const leftArm = makeArm(-1, redMaterial, -.72);
+    const rightArm = makeArm(1, tealMaterial, .48);
+
+    const cannon = new THREE.Group();
+    const cannonBody = this.prepareMesh(new THREE.Mesh(new THREE.BoxGeometry(.42, .38, 1.28), outline));
+    cannonBody.position.z = .04;
+    const cannonInset = this.prepareMesh(new THREE.Mesh(new THREE.BoxGeometry(.25, .1, .68), tealMaterial));
+    cannonInset.position.set(0, .2, .02);
+    const rearCap = this.prepareMesh(new THREE.Mesh(new THREE.CylinderGeometry(.22, .24, .18, 10), redMaterial));
+    rearCap.rotation.x = Math.PI / 2;
+    rearCap.position.z = -.66;
+    const muzzleRim = this.prepareMesh(new THREE.Mesh(new THREE.CylinderGeometry(.3, .27, .22, 12), outline));
+    muzzleRim.rotation.x = Math.PI / 2;
+    muzzleRim.position.z = .7;
+    const muzzleTeal = this.prepareMesh(new THREE.Mesh(new THREE.CylinderGeometry(.24, .24, .24, 12), tealMaterial));
+    muzzleTeal.rotation.x = Math.PI / 2;
+    muzzleTeal.position.z = .76;
+    const chargeCore = this.prepareMesh(new THREE.Mesh(new THREE.SphereGeometry(.15, 10, 7), yolkMaterial));
+    chargeCore.position.z = .91;
+    cannon.add(cannonBody, cannonInset, rearCap, muzzleRim, muzzleTeal, chargeCore);
+    cannon.position.set(.6, 1.82, .18);
+    cannon.rotation.x = -.08;
+    model.add(cannon);
+    const muzzle = new THREE.Object3D();
+    muzzle.position.set(0, 0, 1.08);
+    cannon.add(muzzle);
+
+    const cableCurve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(.58, 1.86, -.42),
+      new THREE.Vector3(.94, 2.04, -.18),
+      new THREE.Vector3(.92, 1.46, .16),
+      new THREE.Vector3(.63, 1.26, .1)
+    ]);
+    const cable = this.prepareMesh(new THREE.Mesh(new THREE.TubeGeometry(cableCurve, 12, .035, 5, false), redMaterial));
+    model.add(cable);
+    const cableInner = this.prepareMesh(new THREE.Mesh(new THREE.TubeGeometry(cableCurve, 12, .012, 5, false), ivoryMaterial));
+    model.add(cableInner);
+
+    model.userData = {
+      torso,
+      leftLeg,
+      rightLeg,
+      leftArm,
+      rightArm,
+      weapon: cannon,
+      cannon,
+      cannonBaseZ: cannon.position.z,
+      cannonBaseRotationX: cannon.rotation.x,
+      chargeCore,
+      muzzle,
+      isEggLord: true
+    };
+    return model;
+  }
+
+  addSunsetStewardDetails(model, primary, accent) {
+    const parts = model.userData;
+    parts.weapon.visible = false;
+    const halo = this.prepareMesh(new THREE.Mesh(
+      new THREE.TorusGeometry(.62, .065, 7, 24),
+      this.standardMaterial(0xf0a845, { emissive: 0x8f321f, emissiveIntensity: .32, metalness: .16, roughness: .42 })
+    ));
+    halo.position.set(0, 2.28, -.38);
+    model.add(halo);
+    const sun = this.prepareMesh(new THREE.Mesh(
+      new THREE.CircleGeometry(.38, 12),
+      new THREE.MeshBasicMaterial({ color: 0xe99b42, transparent: true, opacity: .72, side: THREE.DoubleSide })
+    ), false);
+    sun.position.set(.22, 2.36, -.4);
+    model.add(sun);
+    for (const [x, color, angle] of [[-.34, primary, -.24], [.34, 0x312d33, .24]]) {
+      const tail = this.prepareMesh(new THREE.Mesh(new THREE.ConeGeometry(.34, 1.42, 3), this.standardMaterial(color, { side: THREE.DoubleSide })));
+      tail.position.set(x, .92, -.34);
+      tail.rotation.z = angle;
+      model.add(tail);
+    }
+    const blade = new THREE.Group();
+    const grip = this.prepareMesh(new THREE.Mesh(new THREE.CylinderGeometry(.045, .055, .68, 6), this.standardMaterial(0x2c292d)));
+    const edge = this.prepareMesh(new THREE.Mesh(new THREE.BoxGeometry(.12, 1.06, .06), this.standardMaterial(accent, { metalness: .35, roughness: .28 })));
+    edge.position.y = .82;
+    const point = this.prepareMesh(new THREE.Mesh(new THREE.ConeGeometry(.09, .32, 4), this.standardMaterial(0xf0ad4d, { emissive: 0x8f321f, emissiveIntensity: .2 })));
+    point.position.y = 1.5;
+    blade.add(grip, edge, point);
+    blade.position.set(.62, 1.06, .04);
+    blade.rotation.z = -.28;
+    model.add(blade);
+    parts.weapon = blade;
+    parts.sunsetHalo = halo;
   }
 
   addHeroAccessory(model, shape, primary, accent) {
@@ -716,6 +911,7 @@ class ArenaRuntime {
     Object.keys(entity.cooldowns).forEach((key) => { entity.cooldowns[key] = Math.max(0, entity.cooldowns[key] - dt); });
     if (entity.dead) {
       entity.queuedAction = null;
+      entity.pendingCast = null;
       entity.respawn -= dt;
       if (entity.respawn <= 0) {
         entity.dead = false;
@@ -727,12 +923,36 @@ class ArenaRuntime {
       return;
     }
     if (entity.shieldUntil <= this.match.elapsed) entity.shield = 0;
+    if (entity.pendingCast) {
+      entity.moving = false;
+      entity.moveUntil = 0;
+      this.stepPendingCast(entity);
+      return;
+    }
     entity.moving = entity.moveUntil > this.match.elapsed && entity.stunUntil <= this.match.elapsed;
     if (entity.moving) {
       const speed = (4.4 + entity.level * .08) * entity.moveDirection;
       entity.pos = clamp(entity.pos + speed * dt, 5, 95);
     }
     this.stepQueuedAction(entity);
+  }
+
+  stepPendingCast(entity) {
+    const cast = entity.pendingCast;
+    if (!cast || this.match.elapsed < cast.fireAt) return;
+    entity.pendingCast = null;
+    let target = cast.target;
+    const targetAlive = target && target.hp > 0 && !target.dead && target.alive !== false;
+    if (!targetAlive) target = this.heroTarget(entity, entity.skill1Range);
+    if (!target) {
+      this.emitLog(`${entity.hero.name}的妈妈炮失去目标，蓄积能量安全消散。`);
+      return;
+    }
+    const damage = this.dealDamage(target, cast.rawDamage, entity.side, entity.hero.name, { shieldPenetration: .35 });
+    if (target.hero) target.stunUntil = this.match.elapsed + .55;
+    this.triggerAttack(entity.side, "momma-fire");
+    this.mommaCannonProjectile(entity, target, damage);
+    this.emitLog(`${entity.hero.name}：看炮！妈妈炮轰中目标，造成 ${damage} 伤害。`);
   }
 
   stepQueuedAction(entity) {
@@ -820,14 +1040,17 @@ class ArenaRuntime {
     this.projectile(tower.pos, target.pos, 0xf2c069, 5, "tower", 0);
   }
 
-  dealDamage(target, rawDamage, sourceSide, sourceName) {
+  dealDamage(target, rawDamage, sourceSide, sourceName, options = {}) {
     if (!target || target.hp <= 0 || target.dead) return 0;
     const defense = target.hero ? target.hero.baseDef * (1 + (target.level - 1) * .06) : 45;
     let damage = Math.max(1, Math.floor(rawDamage * 100 / (100 + defense * .22)));
     if (target.shield > 0) {
-      const absorbed = Math.min(target.shield, damage);
+      const penetration = clamp(Number(options.shieldPenetration) || 0, 0, 1);
+      const penetratingDamage = Math.floor(damage * penetration);
+      const blockableDamage = damage - penetratingDamage;
+      const absorbed = Math.min(target.shield, blockableDamage);
       target.shield -= absorbed;
-      damage -= absorbed;
+      damage = penetratingDamage + blockableDamage - absorbed;
     }
     target.hp = Math.max(0, target.hp - damage);
     if (target.hp <= 0) this.handleDefeat(target, sourceSide, sourceName);
@@ -878,6 +1101,7 @@ class ArenaRuntime {
     if (!VALID_ACTIONS.has(action) || !this.match || this.match.finished) return false;
     const entity = this.match[side];
     if (!entity || entity.dead || entity.stunUntil > this.match.elapsed) return false;
+    if (entity.pendingCast) return false;
     if (side === "player") {
       this.match.playerHistory.push(action);
       this.match.playerHistory = this.match.playerHistory.slice(-8);
@@ -924,22 +1148,47 @@ class ArenaRuntime {
         entity.moveDirection = Math.sign(nearest.pos - entity.pos) || 1;
         entity.moveUntil = this.match.elapsed + .25;
       }
-      const skillName = action === "basic" ? "普通攻击" : action === "skill1" ? entity.hero.skills[0] : entity.hero.skills[2];
+      const skillName = this.actionSkillName(entity, action);
       this.showRangeLock(entity, ranges[action]);
       this.emitLog(`${skillName}已锁定最近目标，进入射程后自动施放。`);
       return true;
     }
-    const factors = { basic: .82, skill1: 1.45, ultimate: 2.55 };
-    const cooldowns = { basic: .82, skill1: 5, ultimate: 18 };
     const levelScale = 1 + (entity.level - 1) * .085;
+    if (entity.hero.id === "egg-lord" && action === "skill1") {
+      entity.queuedAction = null;
+      entity.moveUntil = 0;
+      entity.moving = false;
+      entity.cooldowns.skill1 = 5.5;
+      entity.pendingCast = {
+        action,
+        target,
+        startedAt: this.match.elapsed,
+        fireAt: this.match.elapsed + .72,
+        rawDamage: entity.hero.baseAtk * 1.82 * levelScale
+      };
+      this.triggerAttack(side, "momma-charge");
+      this.mommaCannonCharge(entity);
+      this.emitLog(`${entity.hero.name}：妈妈炮蓄力，炮口锁定！`);
+      return true;
+    }
+    const factors = { basic: entity.hero.id === "egg-lord" ? .9 : .82, skill1: 1.45, ultimate: 2.55 };
+    const cooldowns = { basic: .82, skill1: 5, ultimate: 18 };
     const damage = this.dealDamage(target, entity.hero.baseAtk * factors[action] * levelScale, side, entity.hero.name);
     entity.cooldowns[action] = cooldowns[action];
     if (action === "skill1" && target.hero) target.stunUntil = this.match.elapsed + .35;
     this.triggerAttack(side, action);
-    this.projectile(entity.pos, target.pos, side === "player" ? 0x7ed7c9 : 0xef8276, action === "ultimate" ? 13 : 8, action, damage);
-    const skillName = action === "basic" ? "普通攻击" : action === "skill1" ? entity.hero.skills[0] : entity.hero.skills[2];
+    const projectileKind = entity.hero.id === "egg-lord" && action === "basic" ? "egg-basic" : action;
+    const projectileColor = projectileKind === "egg-basic" ? 0xffb632 : side === "player" ? 0x7ed7c9 : 0xef8276;
+    this.projectile(entity.pos, target.pos, projectileColor, action === "ultimate" ? 13 : 8, projectileKind, damage);
+    const skillName = this.actionSkillName(entity, action);
     this.emitLog(`${entity.hero.name}施放${skillName}，造成 ${damage} 伤害。`);
     return true;
+  }
+
+  actionSkillName(entity, action) {
+    if (action === "basic") return entity.hero.id === "egg-lord" ? "平射炮" : "普通攻击";
+    if (action === "skill1") return entity.hero.skills[0];
+    return entity.hero.skills[2];
   }
 
   nearestEnemyTarget(entity) {
@@ -1018,15 +1267,16 @@ class ArenaRuntime {
     return {
       self: {
         hp: self.hp, maxHp: self.maxHp, pos: self.pos, dead: self.dead, level: self.level,
-        cooldowns: Object.assign({}, self.cooldowns), basicRange: self.basicRange, skill1Range: self.skill1Range, ultimateRange: self.ultimateRange
+        cooldowns: Object.assign({}, self.cooldowns), basicRange: self.basicRange, skill1Range: self.skill1Range, ultimateRange: self.ultimateRange,
+        channeling: Boolean(self.pendingCast)
       },
-      enemy: { hp: enemy.hp, maxHp: enemy.maxHp, pos: enemy.pos, moving: enemy.moving, shield: enemy.shield, cooldowns: Object.assign({}, enemy.cooldowns) },
+      enemy: { hp: enemy.hp, maxHp: enemy.maxHp, pos: enemy.pos, moving: enemy.moving, shield: enemy.shield, cooldowns: Object.assign({}, enemy.cooldowns), channeling: Boolean(enemy.pendingCast) },
       playerHistory: this.match.playerHistory.slice(-8),
       allyMinionCover,
       towerCover: Math.abs(self.pos - this.match.structures.kingTower.pos) <= 10 && this.match.structures.kingTower.hp > 0,
       towerDanger: Math.abs(self.pos - enemyTower.pos) <= 11 && enemyTower.hp > 0,
       underEnemyTower: Math.abs(self.pos - enemyTower.pos) <= 11 && enemyTower.hp > 0,
-      enemyChanneling: enemy.cooldowns.ultimate > 17.5,
+      enemyChanneling: Boolean(enemy.pendingCast) || enemy.cooldowns.ultimate > 17.5,
       objectiveOpen: enemyTower.hp <= 0
     };
   }
@@ -1093,20 +1343,156 @@ class ArenaRuntime {
     });
   }
 
+  mommaCannonCharge(entity) {
+    const visual = this.heroVisuals[entity.side];
+    const muzzle = visual?.model.userData.muzzle;
+    if (!muzzle) return;
+    const group = new THREE.Group();
+    const coreMaterial = new THREE.MeshBasicMaterial({ color: 0xffb632, transparent: true, opacity: .9, blending: THREE.AdditiveBlending, depthWrite: false });
+    const core = new THREE.Mesh(new THREE.IcosahedronGeometry(.15, 1), coreMaterial);
+    group.add(core);
+    const rings = [];
+    for (const [radius, color, tilt] of [[.27, 0x6dd3ca, 0], [.36, 0xf2eee4, Math.PI / 2], [.46, 0xd94b3f, Math.PI / 4]]) {
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(radius, .025, 5, 28),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .72, blending: THREE.AdditiveBlending, depthWrite: false })
+      );
+      ring.rotation.set(tilt, tilt * .45, 0);
+      rings.push(ring);
+      group.add(ring);
+    }
+    for (let index = 0; index < 8; index += 1) {
+      const ray = new THREE.Mesh(new THREE.BoxGeometry(.025, .18, .025), new THREE.MeshBasicMaterial({ color: index % 2 ? 0xf2eee4 : 0x6dd3ca, transparent: true, opacity: .75 }));
+      const angle = index / 8 * Math.PI * 2;
+      ray.position.set(Math.cos(angle) * .57, Math.sin(angle) * .57, 0);
+      ray.rotation.z = -angle;
+      group.add(ray);
+    }
+    const anchor = new THREE.Vector3();
+    muzzle.getWorldPosition(anchor);
+    group.position.copy(anchor);
+    this.world.add(group);
+    this.addEffect(group, .72, (progress, elapsed) => {
+      muzzle.getWorldPosition(anchor);
+      group.position.copy(anchor);
+      core.scale.setScalar(.6 + progress * 1.7 + Math.sin(elapsed * 35) * .08);
+      coreMaterial.opacity = .72 + Math.sin(elapsed * 28) * .2;
+      rings.forEach((ring, index) => {
+        ring.rotation.z += .035 * (index % 2 ? -1 : 1);
+        ring.scale.setScalar(.75 + progress * .55);
+      });
+    });
+
+    const indicator = new THREE.Mesh(
+      new THREE.RingGeometry(.72, .84, 48),
+      new THREE.MeshBasicMaterial({ color: 0xd94b3f, transparent: true, opacity: .75, side: THREE.DoubleSide, depthWrite: false })
+    );
+    indicator.rotation.x = -Math.PI / 2;
+    indicator.position.copy(this.laneCoordinates(entity.pos, .08));
+    this.world.add(indicator);
+    this.addEffect(indicator, .72, (progress) => {
+      indicator.position.copy(this.laneCoordinates(entity.pos, .08));
+      indicator.scale.setScalar(.78 + progress * .34);
+      indicator.material.opacity = .75 * (1 - progress * .35);
+    });
+  }
+
+  mommaCannonProjectile(entity, target, damage) {
+    const visual = this.heroVisuals[entity.side];
+    const muzzle = visual?.model.userData.muzzle;
+    const start = new THREE.Vector3();
+    if (muzzle) muzzle.getWorldPosition(start);
+    else start.copy(this.laneCoordinates(entity.pos, 1.7));
+    const end = this.laneCoordinates(target.pos, target.hero ? 1.15 : .95);
+    const group = new THREE.Group();
+    const core = new THREE.Mesh(
+      new THREE.OctahedronGeometry(.32, 0),
+      new THREE.MeshBasicMaterial({ color: 0xffcf59, blending: THREE.AdditiveBlending })
+    );
+    core.scale.z = 1.65;
+    group.add(core);
+    for (const [radius, color, offset] of [[.36, 0xf2eee4, -.08], [.44, 0xd94b3f, .08], [.28, 0x269892, 0]]) {
+      const band = new THREE.Mesh(
+        new THREE.TorusGeometry(radius, .035, 5, 20, Math.PI * 1.45),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .86, side: THREE.DoubleSide, depthWrite: false })
+      );
+      band.position.z = offset;
+      band.rotation.x = Math.PI / 2;
+      group.add(band);
+    }
+    if (!this.compactVisuals) group.add(new THREE.PointLight(0xffbd42, 5.5, 7, 2));
+    group.position.copy(start);
+    this.world.add(group);
+    const trailGeometry = new THREE.BufferGeometry().setFromPoints([start, start]);
+    const trail = new THREE.Line(
+      trailGeometry,
+      new THREE.LineBasicMaterial({ color: 0xf5eee0, transparent: true, opacity: .82, blending: THREE.AdditiveBlending })
+    );
+    this.world.add(trail);
+    this.addEffect(group, .44, (progress, elapsed) => {
+      group.position.lerpVectors(start, end, progress);
+      group.position.y += Math.sin(progress * Math.PI) * .48;
+      group.rotation.z = elapsed * 13;
+      group.rotation.y = elapsed * 9;
+      trailGeometry.setFromPoints([start, group.position.clone()]);
+      trail.material.opacity = .82 * (1 - progress * .5);
+    }, () => {
+      this.world.remove(trail);
+      this.disposeObject(trail);
+      this.mommaCannonExplosion(target.pos, damage);
+    });
+  }
+
+  mommaCannonExplosion(position, damage) {
+    const origin = this.laneCoordinates(position, .92);
+    const flash = new THREE.Group();
+    for (const [index, color] of [0xffce58, 0xf2eee4, 0xd94b3f, 0x269892].entries()) {
+      const burst = new THREE.Mesh(
+        new THREE.OctahedronGeometry(.32 + index * .07, 0),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .88 - index * .09, blending: THREE.AdditiveBlending, depthWrite: false })
+      );
+      burst.rotation.z = index * Math.PI / 4;
+      flash.add(burst);
+    }
+    flash.position.copy(origin);
+    this.world.add(flash);
+    this.addEffect(flash, .5, (progress, elapsed) => {
+      flash.scale.set(1 + progress * 5.2, .8 + progress * 2.8, 1 + progress * 3.7);
+      flash.rotation.y = elapsed * 4;
+      flash.children.forEach((child, index) => { child.material.opacity = Math.max(0, (.88 - index * .09) * (1 - progress)); });
+    });
+    for (const [scale, color, delay] of [[1, 0xf2eee4, 0], [1.45, 0xd94b3f, .08], [1.9, 0x269892, .16]]) {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(.28, .4, 48),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .72, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending })
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.copy(this.laneCoordinates(position, .12 + delay));
+      this.world.add(ring);
+      this.addEffect(ring, .62 + delay, (progress) => {
+        ring.scale.setScalar(scale + progress * 7.5);
+        ring.material.opacity = .72 * (1 - progress);
+      });
+    }
+    this.impactBurst(position, 0xffb632, "momma", damage);
+    this.cameraShake = this.reducedMotion ? 0 : .3;
+  }
+
   projectile(from, to, color, radius, kind = "basic", damage = 0) {
     const start = this.laneCoordinates(from, kind === "tower" ? 2.65 : 1.55);
     const end = this.laneCoordinates(to, .95);
     const group = new THREE.Group();
-    const visualScale = kind === "ultimate" ? .34 : kind === "skill1" ? .24 : kind === "tower" ? .16 : .13;
+    const cannonShot = kind === "egg-basic";
+    const visualScale = kind === "ultimate" ? .34 : kind === "skill1" ? .24 : kind === "tower" ? .16 : cannonShot ? .18 : .13;
     const orb = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(visualScale, kind === "ultimate" ? 2 : 1),
+      cannonShot ? new THREE.OctahedronGeometry(visualScale, 0) : new THREE.IcosahedronGeometry(visualScale, kind === "ultimate" ? 2 : 1),
       new THREE.MeshBasicMaterial({ color })
     );
     group.add(orb);
-    if (kind === "skill1" || kind === "ultimate") {
+    if (kind === "skill1" || kind === "ultimate" || cannonShot) {
       const torus = new THREE.Mesh(
         new THREE.TorusGeometry(visualScale * 1.7, visualScale * .13, 5, 20),
-        new THREE.MeshBasicMaterial({ color: kind === "ultimate" ? 0xffe6a0 : color, transparent: true, opacity: .82 })
+        new THREE.MeshBasicMaterial({ color: kind === "ultimate" ? 0xffe6a0 : cannonShot ? 0xf2eee4 : color, transparent: true, opacity: .82 })
       );
       torus.rotation.x = Math.PI / 2;
       group.add(torus);
@@ -1119,9 +1505,9 @@ class ArenaRuntime {
     const trail = new THREE.Line(lineGeometry, new THREE.LineBasicMaterial({ color, transparent: true, opacity: .65, blending: THREE.AdditiveBlending }));
     group.position.copy(start);
     this.world.add(group, trail);
-    const duration = kind === "ultimate" ? .42 : kind === "skill1" ? .3 : .2;
+    const duration = kind === "ultimate" ? .42 : kind === "skill1" ? .3 : cannonShot ? .23 : .2;
     this.addEffect(group, duration, (progress, elapsed) => {
-      const arc = Math.sin(progress * Math.PI) * (kind === "ultimate" ? 2 : .65);
+      const arc = cannonShot ? 0 : Math.sin(progress * Math.PI) * (kind === "ultimate" ? 2 : .65);
       group.position.lerpVectors(start, end, progress);
       group.position.y += arc;
       group.rotation.y = elapsed * (kind === "ultimate" ? 11 : 7);
@@ -1132,13 +1518,14 @@ class ArenaRuntime {
     }, () => {
       this.world.remove(trail);
       this.disposeObject(trail);
-      this.impactBurst(to, color, kind, damage);
+      this.impactBurst(to, color, cannonShot ? "basic" : kind, damage);
     });
   }
 
   impactBurst(position, color, kind = "basic", damage = 0) {
     const origin = this.laneCoordinates(position, .9);
-    const count = this.compactVisuals ? (kind === "ultimate" ? 22 : 10) : (kind === "ultimate" ? 48 : kind === "skill1" ? 24 : 14);
+    const heavy = kind === "ultimate" || kind === "momma";
+    const count = this.compactVisuals ? (heavy ? 24 : 10) : (kind === "momma" ? 58 : kind === "ultimate" ? 48 : kind === "skill1" ? 24 : 14);
     const positions = new Float32Array(count * 3);
     const velocities = [];
     const random = seededRandom(Math.floor(position * 997 + this.match.elapsed * 100));
@@ -1147,14 +1534,14 @@ class ArenaRuntime {
       positions[index * 3 + 1] = origin.y;
       positions[index * 3 + 2] = origin.z;
       const angle = random() * Math.PI * 2;
-      const speed = .9 + random() * (kind === "ultimate" ? 4.2 : 2.4);
+      const speed = .9 + random() * (heavy ? 4.5 : 2.4);
       velocities.push(new THREE.Vector3(Math.cos(angle) * speed, 1 + random() * 3.2, Math.sin(angle) * speed));
     }
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     const material = new THREE.PointsMaterial({
       color,
-      size: kind === "ultimate" ? .22 : .14,
+      size: heavy ? .22 : .14,
       transparent: true,
       opacity: .92,
       depthWrite: false,
@@ -1162,7 +1549,7 @@ class ArenaRuntime {
     });
     const particles = new THREE.Points(geometry, material);
     this.world.add(particles);
-    const duration = kind === "ultimate" ? .82 : .48;
+    const duration = heavy ? .82 : .48;
     this.addEffect(particles, duration, (progress, elapsed, dt) => {
       const attribute = geometry.attributes.position;
       for (let index = 0; index < count; index += 1) {
@@ -1183,17 +1570,18 @@ class ArenaRuntime {
     shock.rotation.x = -Math.PI / 2;
     shock.position.copy(this.laneCoordinates(position, .12));
     this.world.add(shock);
-    this.addEffect(shock, kind === "ultimate" ? .72 : .38, (progress) => {
-      shock.scale.setScalar(1 + progress * (kind === "ultimate" ? 8 : 4));
+    this.addEffect(shock, heavy ? .72 : .38, (progress) => {
+      shock.scale.setScalar(1 + progress * (heavy ? 8 : 4));
       shock.material.opacity = .82 * (1 - progress);
     });
-    if (kind === "ultimate") this.cameraShake = this.reducedMotion ? 0 : .24;
+    if (heavy) this.cameraShake = this.reducedMotion ? 0 : .24;
     if (damage > 0) this.showDamageNumber(origin, damage, kind);
   }
 
   showDamageNumber(origin, damage, kind) {
-    const sprite = this.createTextSprite(`-${damage}`, kind === "ultimate" ? "#ffe09b" : "#ffffff", "rgba(39,20,14,.74)");
-    sprite.scale.set(kind === "ultimate" ? 1.45 : 1.05, kind === "ultimate" ? .38 : .28, 1);
+    const heavy = kind === "ultimate" || kind === "momma";
+    const sprite = this.createTextSprite(`-${damage}`, kind === "momma" ? "#ffcb55" : heavy ? "#ffe09b" : "#ffffff", "rgba(39,20,14,.74)");
+    sprite.scale.set(heavy ? 1.45 : 1.05, heavy ? .38 : .28, 1);
     sprite.position.copy(origin).add(new THREE.Vector3(0, .65, 0));
     this.world.add(sprite);
     this.addEffect(sprite, .85, (progress) => {
@@ -1255,21 +1643,36 @@ class ArenaRuntime {
       visual.queueRing.rotation.z = now * 1.1;
       visual.ring.material.opacity = .58 + Math.sin(now * 3 + (side === "player" ? 0 : 1)) * .14;
       this.updateStatusBillboard(visual.billboard, entity.hp / entity.maxHp);
-      visual.billboard.group.position.y = 3.18 + Math.sin(now * 2.4) * .025;
+      const billboardBaseY = entity.hero.id === "egg-lord" ? 3.72 : entity.hero.id === "sunset-steward" ? 3.42 : 3.18;
+      visual.billboard.group.position.y = billboardBaseY + Math.sin(now * 2.4) * .025;
 
       const parts = visual.model.userData;
       const stride = entity.moving ? Math.sin(now * 10.5) : 0;
       parts.leftLeg.rotation.z = stride * .38;
       parts.rightLeg.rotation.z = -stride * .38;
       visual.model.position.y = entity.moving ? Math.abs(stride) * .09 : Math.sin(now * 2.2) * .025;
-      visual.model.rotation.z = entity.stunUntil > this.match.elapsed ? Math.sin(now * 28) * .06 : 0;
+      const idleSway = entity.moving ? stride * .018 : Math.sin(now * 1.8 + (side === "player" ? 0 : 1.1)) * .026;
+      visual.model.rotation.z = entity.stunUntil > this.match.elapsed ? Math.sin(now * 28) * .06 : idleSway;
       const attackAge = now - visual.attackStartedAt;
-      const attackDuration = visual.attackKind === "ultimate" ? .62 : .38;
+      const attackDuration = visual.attackKind === "ultimate" ? .62 : visual.attackKind === "momma-charge" ? .72 : visual.attackKind === "momma-fire" ? .48 : .38;
       const attackPulse = attackAge >= 0 && attackAge < attackDuration ? Math.sin(attackAge / attackDuration * Math.PI) : 0;
-      parts.rightArm.rotation.x = -attackPulse * 1.8;
-      parts.weapon.rotation.x = -attackPulse * 1.45;
-      parts.leftArm.rotation.x = visual.attackKind === "skill2" ? -attackPulse * 1.1 : 0;
-      parts.torso.rotation.x = attackPulse * .12;
+      if (parts.isEggLord) {
+        const charging = visual.attackKind === "momma-charge" && attackAge >= 0 && attackAge < .72;
+        const firing = visual.attackKind === "momma-fire" && attackAge >= 0 && attackAge < .48;
+        parts.rightArm.rotation.x = charging ? -.22 - attackPulse * .35 : firing ? -attackPulse * .72 : -stride * .08;
+        parts.leftArm.rotation.x = charging ? -.12 - attackPulse * .18 : stride * .08;
+        parts.cannon.rotation.x = parts.cannonBaseRotationX + (charging ? attackPulse * .08 : firing ? -attackPulse * .16 : 0);
+        parts.cannon.position.z = parts.cannonBaseZ - (firing ? attackPulse * .2 : 0);
+        parts.chargeCore.scale.setScalar(charging ? 1 + attackPulse * .52 : firing ? 1 + attackPulse * .28 : 1);
+        parts.chargeCore.material.emissiveIntensity = charging ? .35 + attackPulse * .65 : .13;
+        parts.torso.rotation.x = firing ? attackPulse * .09 : 0;
+      } else {
+        parts.rightArm.rotation.x = -attackPulse * 1.8;
+        parts.weapon.rotation.x = -attackPulse * 1.45;
+        parts.leftArm.rotation.x = visual.attackKind === "skill2" ? -attackPulse * 1.1 : 0;
+        parts.torso.rotation.x = attackPulse * .12;
+      }
+      if (parts.sunsetHalo) parts.sunsetHalo.rotation.z = now * .32;
       if (entity.dead && !visual.wasDead) this.impactBurst(entity.pos, 0x6c7772, "skill1", 0);
       if (!entity.dead && visual.wasDead) this.flashAt(entity.pos, visual.teamColor, 1.6);
       visual.wasDead = entity.dead;
@@ -1429,6 +1832,9 @@ class ArenaRuntime {
       hp: Math.floor(entity.hp), maxHp: Math.floor(entity.maxHp), level: entity.level, xp: entity.xp,
       gold: entity.gold, kills: entity.kills, deaths: entity.deaths, dead: entity.dead, respawn: Math.max(0, entity.respawn),
       queuedAction: entity.queuedAction,
+      channeling: Boolean(entity.pendingCast),
+      castAction: entity.pendingCast?.action || "",
+      castRemaining: entity.pendingCast ? Math.max(0, entity.pendingCast.fireAt - this.match.elapsed) : 0,
       cooldowns: Object.fromEntries(Object.entries(entity.cooldowns).map(([key, value]) => [key, Math.max(0, value)]))
     });
     return {
@@ -1479,5 +1885,5 @@ window.WorldArena = {
   stop,
   isRunning: () => Boolean(activeArena && activeArena.match && !activeArena.match.finished),
   snapshot: () => activeArena?.hudSnapshot() || null,
-  version: "2.0.0-three-0.185.1"
+  version: "2.1.0-three-0.185.1"
 };

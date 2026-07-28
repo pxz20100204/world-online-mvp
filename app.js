@@ -3,7 +3,7 @@
 
   const { heroes, stages, villages, archive } = window.GAME_DATA;
   const STORAGE_KEY = "world-online-save-v1";
-  const APP_VERSION = "0.12.0";
+  const APP_VERSION = "0.13.0";
   const GAME_SERVER = { id: "gold-1", name: "金牛一服", region: "中国大陆", status: "运行正常" };
   const main = document.getElementById("main-content");
   const modalRoot = document.getElementById("modal-root");
@@ -94,7 +94,9 @@
   let arenaEnginePromise = null;
   let songAudio = null;
   let songTrackKey = "";
-  let songFadeTimer = null;
+  const songAudioPool = new Set();
+  const songFadeTimers = new Map();
+  const songPlayAttempts = new WeakMap();
   let songDesiredPlayback = false;
   let deferredInstallPrompt = null;
   let serviceWorkerRegistration = null;
@@ -245,35 +247,67 @@
     if (typeof Audio === "undefined") return null;
     const nextKey = currentSceneSongKey();
     if (songAudio && songTrackKey === nextKey) return songAudio;
-    if (songAudio) {
-      songAudio.pause();
-      songAudio.removeAttribute("src");
-      songAudio.load();
-    }
     songTrackKey = nextKey;
     songAudio = new Audio(TAURUS_SCENE_TRACKS[nextKey].src);
     songAudio.loop = true;
     songAudio.preload = "auto";
     songAudio.volume = 0;
-    songAudio.addEventListener("error", () => console.error("Taurus song failed to load", songAudio?.error), { once: true });
+    songAudioPool.add(songAudio);
+    const audio = songAudio;
+    audio.addEventListener("error", () => console.error("Taurus song failed to load", audio.error), { once: true });
     return songAudio;
   }
 
-  function fadeGameSong(targetVolume, duration = 650, onComplete) {
-    const audio = ensureGameSong();
+  function cancelGameSongFade(audio) {
+    const timer = songFadeTimers.get(audio);
+    if (!timer) return;
+    clearInterval(timer);
+    songFadeTimers.delete(audio);
+  }
+
+  function disposeGameSong(audio) {
+    if (!audio || audio === songAudio) return;
+    cancelGameSongFade(audio);
+    songAudioPool.delete(audio);
+    audio.pause();
+    audio.removeAttribute("src");
+    audio.load();
+  }
+
+  function fadeGameSong(audio, targetVolume, duration = 650, onComplete) {
     if (!audio) return;
-    if (songFadeTimer) clearInterval(songFadeTimer);
+    cancelGameSongFade(audio);
     const initial = audio.volume;
     const startedAt = performance.now();
-    songFadeTimer = setInterval(() => {
+    const timer = setInterval(() => {
       const progress = Math.min(1, (performance.now() - startedAt) / duration);
       audio.volume = initial + (targetVolume - initial) * progress;
       if (progress >= 1) {
-        clearInterval(songFadeTimer);
-        songFadeTimer = null;
+        clearInterval(timer);
+        if (songFadeTimers.get(audio) === timer) songFadeTimers.delete(audio);
         onComplete?.();
       }
     }, 40);
+    songFadeTimers.set(audio, timer);
+  }
+
+  function activateGameSong(audio) {
+    if (audio !== songAudio) {
+      disposeGameSong(audio);
+      return;
+    }
+    if (!songDesiredPlayback || !state.settings.sound) {
+      cancelGameSongFade(audio);
+      audio.volume = 0;
+      audio.pause();
+      return;
+    }
+    fadeGameSong(audio, .18);
+    for (const previousAudio of Array.from(songAudioPool)) {
+      if (previousAudio === audio) continue;
+      if (previousAudio.paused) disposeGameSong(previousAudio);
+      else fadeGameSong(previousAudio, 0, 520, () => disposeGameSong(previousAudio));
+    }
   }
 
   function startGameSong() {
@@ -281,28 +315,50 @@
     songDesiredPlayback = true;
     const audio = ensureGameSong();
     if (!audio) return;
+    if (songPlayAttempts.has(audio)) return;
     if (!audio.paused) {
-      if (audio.volume < .17) fadeGameSong(.18);
+      if (audio.volume < .17) fadeGameSong(audio, .18);
+      for (const previousAudio of Array.from(songAudioPool)) {
+        if (previousAudio !== audio) fadeGameSong(previousAudio, 0, 520, () => disposeGameSong(previousAudio));
+      }
       return;
     }
-    const playback = audio.play();
+    let playback;
+    try {
+      playback = audio.play();
+    } catch (error) {
+      return;
+    }
     if (playback?.then) {
-      playback.then(() => {
-        if (songDesiredPlayback && state.settings.sound) fadeGameSong(.18);
-        else { audio.volume = 0; audio.pause(); }
-      }).catch(() => {
-        // Browsers may reject playback until the next direct user interaction.
-      });
+      const attempt = Promise.resolve(playback)
+        .then(() => activateGameSong(audio))
+        .catch(() => {
+          // Browsers may reject playback until the next direct user interaction.
+        })
+        .finally(() => {
+          if (songPlayAttempts.get(audio) === attempt) songPlayAttempts.delete(audio);
+        });
+      songPlayAttempts.set(audio, attempt);
     } else {
-      fadeGameSong(.18);
+      activateGameSong(audio);
     }
   }
 
   function stopGameSong() {
     songDesiredPlayback = false;
     if (!songAudio) return;
-    if (songAudio.paused) { songAudio.volume = 0; return; }
-    fadeGameSong(0, 300, () => songAudio?.pause());
+    for (const audio of Array.from(songAudioPool)) {
+      if (audio.paused) {
+        cancelGameSongFade(audio);
+        audio.volume = 0;
+        if (audio !== songAudio) disposeGameSong(audio);
+        continue;
+      }
+      fadeGameSong(audio, 0, 300, () => {
+        audio.pause();
+        if (audio !== songAudio) disposeGameSong(audio);
+      });
+    }
   }
 
   function syncGameSong() {
@@ -328,7 +384,8 @@
       readyState: songAudio?.readyState || 0,
       networkState: songAudio?.networkState || 0,
       errorCode: songAudio?.error?.code || 0,
-      track: songTrackKey
+      track: songTrackKey,
+      activeTracks: songAudioPool.size
     })
   };
 
@@ -754,7 +811,7 @@
   function portraitSvg(heroLike) {
     const hero = heroLike || { name: "未知", color: "#586763", accent: "#dce4e1", shape: "mask" };
     const symbols = {
-      egg: '<ellipse cx="50" cy="49" rx="24" ry="29" fill="var(--accent)"/><path d="M35 49c8-7 22-7 30 0" stroke="var(--color)" stroke-width="5" stroke-linecap="round"/><circle cx="43" cy="43" r="3" fill="#1d2725"/><circle cx="57" cy="43" r="3" fill="#1d2725"/>',
+      egg: '<path d="m31 30 4-17 12 11 9-16 8 17 13-10-4 21H29l2-6Z" fill="#f2eee4" stroke="#252a2d" stroke-width="3"/><ellipse cx="45" cy="51" rx="25" ry="27" fill="#f2eee4" stroke="#252a2d" stroke-width="3"/><circle cx="45" cy="51" r="17" fill="#ffb632"/><path d="M37 54c5 5 11 5 16 0" fill="none" stroke="#252a2d" stroke-width="3" stroke-linecap="round"/><path d="M36 44v7m18-7v7" stroke="#252a2d" stroke-width="4"/><path d="M67 42h24v13H67z" fill="#252a2d"/><path d="M72 44h12v3H72z" fill="#208b87"/><circle cx="89" cy="48.5" r="7" fill="#208b87" stroke="#252a2d" stroke-width="3"/><circle cx="89" cy="48.5" r="3" fill="#ffb632"/>',
       crown: '<path d="M27 43l8-19 15 13 15-13 8 19-5 28H32l-5-28Z" fill="var(--accent)"/><circle cx="50" cy="50" r="17" fill="var(--color)"/><path d="M42 54c5 4 11 4 16 0" stroke="white" stroke-width="3" stroke-linecap="round"/>',
       bun: '<circle cx="39" cy="46" r="18" fill="var(--accent)"/><circle cx="60" cy="46" r="18" fill="var(--accent)"/><ellipse cx="50" cy="58" rx="25" ry="22" fill="var(--accent)"/><path d="M36 41c8 8 20 8 28 0M42 59h16" stroke="var(--color)" stroke-width="3" stroke-linecap="round"/>',
       sword: '<circle cx="50" cy="39" r="18" fill="var(--accent)"/><path d="M30 81c2-22 10-31 20-31s18 9 20 31H30Z" fill="var(--color)"/><path d="M72 23 38 69m2-37 23 23" stroke="white" stroke-width="4" stroke-linecap="round"/>',
@@ -1875,7 +1932,8 @@
   }
 
   function renderArenaMatchShell(playerHero, kingHero) {
-    main.innerHTML = `<section class="page arena-match-page">
+    const eggTheme = playerHero.id === "egg-lord" ? " egg-lord-theme" : "";
+    main.innerHTML = `<section class="page arena-match-page${eggTheme}">
       <header class="arena-scoreboard">
         <div class="arena-score-side player"><strong id="arena-player-kills">0</strong><span>${playerHero.name}</span><small id="arena-player-level">Lv.1</small></div>
         <div class="arena-clock"><strong id="arena-time">03:00</strong><span>第 <b id="arena-wave">0</b> 波</span></div>
@@ -1884,11 +1942,11 @@
       </header>
       <div class="arena-game-shell"><div id="arena-game-root"><div class="arena-loading">正在建立竞技场</div></div></div>
       <section class="arena-hud">
-        <div class="arena-status-block player"><div class="arena-hp-head"><strong>${playerHero.name}</strong><span id="arena-player-hp">--</span></div><div class="arena-hp"><span id="arena-player-hp-bar"></span></div><div class="arena-objectives"><span>外塔 <b id="arena-player-tower">5200</b></span><span>基地 <b id="arena-player-core">8500</b></span><span>金币 <b id="arena-player-gold">0</b></span></div></div>
+        <div class="arena-status-block player"><div class="arena-hp-head"><strong>${playerHero.name}</strong><span id="arena-player-hp">--</span></div><div class="arena-hp"><span id="arena-player-hp-bar"></span></div><div id="arena-cast-state" class="arena-cast-state" hidden><span></span><strong>妈妈炮蓄力</strong><b id="arena-cast-time">0.0s</b></div><div class="arena-objectives"><span>外塔 <b id="arena-player-tower">5200</b></span><span>基地 <b id="arena-player-core">8500</b></span><span>金币 <b id="arena-player-gold">0</b></span></div></div>
         <div class="arena-controls" aria-label="野局操作">
           <button data-action="arena-command" data-command="retreat" title="后撤">${icon("arrow-left")}</button>
           <button data-action="arena-command" data-command="advance" title="推进">${icon("arrow-right")}</button>
-          <button id="arena-basic" data-action="arena-command" data-command="basic"><strong>普攻</strong><small class="cooldown"></small></button>
+          <button id="arena-basic" data-action="arena-command" data-command="basic"><strong>${playerHero.id === "egg-lord" ? "平射炮" : "普攻"}</strong><small class="cooldown"></small></button>
           <button id="arena-skill1" data-action="arena-command" data-command="skill1"><strong>${playerHero.skills[0]}</strong><small class="cooldown"></small></button>
           <button id="arena-skill2" data-action="arena-command" data-command="skill2"><strong>${playerHero.skills[1]}</strong><small class="cooldown"></small></button>
           <button id="arena-ultimate" class="ultimate" data-action="arena-command" data-command="ultimate"><strong>${playerHero.skills[2]}</strong><small class="cooldown"></small></button>
@@ -1958,6 +2016,9 @@
     setText("arena-player-core", Math.max(0, Math.floor(snapshot.playerCore)));
     setText("arena-king-core", Math.max(0, Math.floor(snapshot.kingCore)));
     setText("arena-player-gold", snapshot.player.gold);
+    const castState = document.getElementById("arena-cast-state");
+    if (castState) castState.hidden = !snapshot.player.channeling;
+    setText("arena-cast-time", `${(snapshot.player.castRemaining || 0).toFixed(1)}s`);
     setText("arena-ai-status", snapshot.ai.status || "独立决策器正常");
     setText("arena-ai-reason", `${snapshot.ai.reason || "固定预算决策"} · ${snapshot.ai.candidates || 7} 候选 · ${snapshot.ai.computeMs || 0}ms`);
     setText("arena-fps", `${Math.round(snapshot.fps || 60)} FPS`);
@@ -1967,11 +2028,12 @@
       const button = document.getElementById(`arena-${key}`);
       if (!button) continue;
       const cooldown = snapshot.player.cooldowns[key];
-      button.disabled = snapshot.player.dead || cooldown > .05;
+      button.disabled = snapshot.player.dead || snapshot.player.channeling || cooldown > .05;
       button.classList.toggle("cooling", cooldown > .05);
       button.classList.toggle("queued", snapshot.player.queuedAction === key);
+      button.classList.toggle("charging", key === "skill1" && snapshot.player.channeling);
       const label = button.querySelector(".cooldown");
-      if (label) label.textContent = cooldown > .05 ? `${cooldown.toFixed(1)}s` : snapshot.player.queuedAction === key ? "锁定中" : "就绪";
+      if (label) label.textContent = key === "skill1" && snapshot.player.channeling ? `蓄力 ${(snapshot.player.castRemaining || 0).toFixed(1)}s` : cooldown > .05 ? `${cooldown.toFixed(1)}s` : snapshot.player.queuedAction === key ? "锁定中" : "就绪";
     }
     document.querySelectorAll('[data-action="arena-command"][data-command="advance"],[data-action="arena-command"][data-command="retreat"]').forEach((button) => { button.disabled = snapshot.player.dead; });
   }
