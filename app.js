@@ -3,7 +3,7 @@
 
   const { heroes, stages, villages, archive } = window.GAME_DATA;
   const STORAGE_KEY = "world-online-save-v1";
-  const APP_VERSION = "0.10.0";
+  const APP_VERSION = "0.11.0";
   const GAME_SERVER = { id: "gold-1", name: "金牛一服", region: "中国大陆", status: "运行正常" };
   const main = document.getElementById("main-content");
   const modalRoot = document.getElementById("modal-root");

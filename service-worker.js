@@ -1,4 +1,4 @@
-const CACHE_VERSION = "world-online-shell-v0.10.0";
+const CACHE_VERSION = "world-online-shell-v0.11.0";
 const CORE_ASSETS = [
   "./",
   "./index.html",
