@@ -3,7 +3,7 @@
 
   const { heroes, stages, villages, archive } = window.GAME_DATA;
   const STORAGE_KEY = "world-online-save-v1";
-  const APP_VERSION = "0.11.0";
+  const APP_VERSION = "0.12.0";
   const GAME_SERVER = { id: "gold-1", name: "金牛一服", region: "中国大陆", status: "运行正常" };
   const main = document.getElementById("main-content");
   const modalRoot = document.getElementById("modal-root");
@@ -224,29 +224,11 @@
     if (window.lucide) window.lucide.createIcons({ attrs: { "aria-hidden": "true" } });
   }
 
-  function loadScriptOnce(source, id) {
-    const existing = document.getElementById(id);
-    if (existing) return new Promise((resolve, reject) => {
-      if (existing.dataset.loaded === "true") return resolve();
-      existing.addEventListener("load", resolve, { once: true });
-      existing.addEventListener("error", reject, { once: true });
-    });
-    return new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.id = id;
-      script.src = source;
-      script.async = true;
-      script.addEventListener("load", () => { script.dataset.loaded = "true"; resolve(); }, { once: true });
-      script.addEventListener("error", () => { script.remove(); reject(new Error(`Failed to load ${source}`)); }, { once: true });
-      document.head.appendChild(script);
-    });
-  }
-
   function ensureArenaEngine() {
-    if (window.Phaser && window.WorldArena) return Promise.resolve();
+    if (window.WorldArena) return Promise.resolve();
     if (!arenaEnginePromise) {
-      arenaEnginePromise = loadScriptOnce("vendor/phaser.min.js", "phaser-runtime")
-        .then(() => loadScriptOnce("arena.js", "arena-runtime"))
+      const moduleUrl = new URL(`arena.js?v=${APP_VERSION}`, document.baseURI).href;
+      arenaEnginePromise = import(moduleUrl)
         .catch((error) => { arenaEnginePromise = null; throw error; });
     }
     return arenaEnginePromise;
